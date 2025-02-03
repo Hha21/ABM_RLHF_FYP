@@ -1,16 +1,9 @@
 #///////////////////////////////////////IMPORTS/////////////////////////////////////////#
 
-from select import select
 import numpy as np
-# import pandas as pd
 import matplotlib.pyplot as plt
-
 import copy
-# import csv
-
 from operator import itemgetter
-# from tabulate import tabulate
-# from datetime import date
 
 from ABM_plots import plot_emissions_over_time #, plot_measures_over_time
 
@@ -40,13 +33,10 @@ from ABM_plots import plot_emissions_over_time #, plot_measures_over_time
 scenarios = ["Tax"]
 fixed_seed = False  # fixed-seed for random variables?
 # how to select from param_range: mid-point, upper-bound, lower-bound, random, id
-single_run_mode = "mid-point"
+single_run_mode = "random"
 glob_id = 1  # ID for single_run_mode
 
-
 print_errors = True
-fs = 13  # font size for plots
-
 
 #////////////////////////////////////////PARAMETERS/////////////////////////////////////#
 
@@ -77,17 +67,20 @@ param_range = {
 
 class c_parameters:
     def __init__(self, variable_parameters):
+
         # Fixed Params
-        self.TP = 30  # no. periods
-        self.t_start = 11  # delay until policy starts
+        self.TP = 30  # no. periods (30)
+        self.t_start = 11  # delay until policy starts (11)
         self.t_period = 10  # length of regulation period
         self.t_impl = 10  # no. of implementation periods
         self.D0 = 1  # max. demand
         self.A0 = 1  # emission intensity
         self.B0 = 1  # prod. costs
         self.lamb_n = 20  # no. of technological steps
-        self.pe0 = 0.01  # initial permit price
         self.I_d = 0.1  # desired inventory share
+
+        self.mode = "Tax"
+        self.emission_tax = True
 
         # Expectation factor ranges
         exp_x_trend = [0.5, 1.0]
@@ -165,16 +158,6 @@ class c_parameters:
         self.error = True
         if statement not in self.log:
             self.log.append(statement)   
-    
-    # Scenarios 
-    def load_sc(self,scenario):
-        # Load Scenario
-        getattr(self,scenario)() 
-
-    def Tax(self):
-        self.mode = "Tax"
-        self.emission_tax = True
-        self.permit_market = False
 
 
 class c_regulator:
@@ -373,7 +356,7 @@ def tp(p, t):
 
 #///////////////////////////////////////DYNAMICS/////////////////////////////////////////#
 
-def run_model(scenarios, param_values=0, calibrating=False, p_cal=0):
+def run_model(param_values=0, calibrating=False, p_cal=0):
 
     # results = []
 
@@ -381,50 +364,49 @@ def run_model(scenarios, param_values=0, calibrating=False, p_cal=0):
     if calibrating == False:
         pr = c_parameters(param_values)
         random_par = pr.generate_random_par()
+    
 
-    # iterate through all scenarios
-    for scenario in scenarios:
+    # load parameters
+    if calibrating == False:
+        p = c_parameters(param_values)
+        # p.load_sc(scenario)
+        p.load_random_par(random_par)
+    else:
+        p = p_cal
 
-        # load parameters
-        if calibrating == False:
-            p = c_parameters(param_values)
-            p.load_sc(scenario)
-            p.load_random_par(random_par)
-        else:
-            p = p_cal
+    # calibrate tax
+    if p.calibrate == True and calibrating == False:
+        calibrate_tax(p)
 
-        # calibrate tax
-        if scenario == "Tax" and p.calibrate == True and calibrating == False:
-            calibrate_tax(p)
+    # initialise agents
+    # 1, sector and firms
+    p.sec = sec = c_sector(p)
+    # 2, regulator
+    p.reg = reg = c_regulator(p)
 
-        # initialise agents
-        # 1, sector and firms
-        p.sec = sec = c_sector(p)
-        # 2, regulator
-        p.reg = reg = c_regulator(p)
+    # run simulation
+    t = 1
 
-        # run simulation
-        t = 1
+    while t <= p.T:
 
-        while t <= p.T:
+        if (t-1) % p.t_period == 0:
+            reg.update_policy(sec, p, t)
 
-            if (t-1) % p.t_period == 0:
-                reg.update_policy(sec, p, t)
+        sec.apply("set_expectations", p, t)
 
-            sec.apply("set_expectations", p, t)
+        sec.apply("abatement", p, t)
+        sec.production(p, t)
+        trade_commodities(sec, p, t)
 
-            sec.apply("abatement", p, t)
-            sec.production(p, t)
-            trade_commodities(sec, p, t)
+        # move to next round
+        t += 1
 
-            # move to next round
-            t += 1
     results = [sec, p]
     # results.append([sec, p])
 
     # check for errors
     if print_errors == True and p.error == True and calibrating == False:
-        print("Errors found in Scenario", scenario)
+        print("Errors found in Scenario")
         print(p.log)
 
     return results
@@ -541,7 +523,7 @@ def evaluation_measures(results):
     PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
 
     # Corresponds with measure_names
-    measures.append([p.mode, E, CA, CE, AT, AC,
+    measures.append([E, CA, CE, AT, AC,
                     S, PL, HHI, CC0, CC, PE])
 
     return measures
@@ -561,7 +543,7 @@ def evaluation_measures_cumulative(measures_cum, results, t):
 
     # Efficiency / Abatement Decomposition
     # "Compositional change","Technology adoption","Reduction of total production"
-    ac, at, ar, ab_tot = calc_abatement_analysis(sc)
+    ac, at, ar, ab_tot = calc_abatement_analysis(sec)
     AT = sum(at[t-p.t_period:t])
     AC = sum(ac[t-p.t_period:t])
 
@@ -579,7 +561,7 @@ def evaluation_measures_cumulative(measures_cum, results, t):
     # Others
     PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
 
-    measures_cum.append([p.mode, E, CA, CE, AT, AC,
+    measures_cum.append([E, CA, CE, AT, AC,
                     S, PL, HHI, CC0, CC, PE])
 
     return measures_cum
@@ -594,7 +576,7 @@ def plot_measures_over_time(results):
     - measures_values (list of lists): Corresponding values of the measures over time.
     """
 
-    measures_names = ["Scenario", "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
+    measures_names = ["Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
                  "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price"]
 
     measures_cum = []
@@ -637,9 +619,10 @@ for par in param_range['bounds']:
     if single_run_mode == "random":
         param.append(par[0]+(par[1]-par[0])*np.random.random())
 
-results = run_model(scenarios, param)
+results = run_model(param)
 
 measures = evaluation_measures(results)
 
-print((results[1].N))
+print(f"N firms is: {results[1].N}")
+print(f"Avg. Sales Price: {measures[0][8]}")
 plot_emissions_over_time(results)
