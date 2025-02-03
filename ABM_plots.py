@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 def plot_emissions_over_time(results):
 
-    sec, p = results[0]  # Extract sector and parameters from results
+    sec, p = results              # Extract sector and parameters from results
 
     # Create time axis
     time_steps = np.arange(1, p.T+1)
@@ -21,3 +21,5 @@ def plot_emissions_over_time(results):
     plt.legend()
     plt.grid(True)
     plt.show()
+
+

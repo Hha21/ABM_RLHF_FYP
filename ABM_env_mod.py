@@ -38,10 +38,7 @@ from ABM_plots import plot_emissions_over_time #, plot_measures_over_time
 
 # scenarios to compare
 scenarios = ["Tax"]
-
-analyse_single_run = True  # show main dyn. for a single run
-single_run_details = False  # show time-series for all variables
-fixed_seed = True  # fixed-seed for random variables?
+fixed_seed = False  # fixed-seed for random variables?
 # how to select from param_range: mid-point, upper-bound, lower-bound, random, id
 single_run_mode = "mid-point"
 glob_id = 1  # ID for single_run_mode
@@ -378,7 +375,7 @@ def tp(p, t):
 
 def run_model(scenarios, param_values=0, calibrating=False, p_cal=0):
 
-    results = []
+    # results = []
 
     # set up random parameters
     if calibrating == False:
@@ -422,8 +419,8 @@ def run_model(scenarios, param_values=0, calibrating=False, p_cal=0):
 
             # move to next round
             t += 1
-
-    results.append([sec, p])
+    results = [sec, p]
+    # results.append([sec, p])
 
     # check for errors
     if print_errors == True and p.error == True and calibrating == False:
@@ -442,7 +439,7 @@ def calibrate_tax(p_cal):
     p_cal.tax = (mintax + maxtax) / 2
 
     results = run_model(["Tax"], p_cal=p_cal, calibrating=True)
-    sec, p = results[0]
+    sec, p = results
 
     while abs(sec.E[p.T-1] - p.E_max) > p.calibration_threshold:
         if sec.E[p.T-1] >= p.E_max:
@@ -453,7 +450,7 @@ def calibrate_tax(p_cal):
         p_cal.tax = (mintax + maxtax) / 2
 
         results = run_model(["Tax"], p_cal=p_cal, calibrating=True)
-        sec, p = results[0]
+        sec, p = results
         c += 1
 
         if c > p.calibration_max_runs:
@@ -511,75 +508,83 @@ def evaluation_measures(results):
 
     measures = []
 
-    for sc in results:
-        sec, p = sc
-        t = p.T+1
-        # Effectiveness & Economic Impact
-        E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
-        CA = sum([sum([(j.B[ti]-j.B[1])*j.qg[ti] for j in sec])
-                 for ti in range(t-p.t_period, t)]) / E
-        CE = sum([sum([j.e[ti]*j.c_e[ti] for j in sec])
-                 for ti in range(t-p.t_period, t)])
-        HHI = sum([sum([j.s[ti]**2 for j in sec])
-                  for ti in range(t-p.t_period, t)])
+    sec, p = results
+    t = p.T+1
 
-        # Efficiency / Abatement Decomposition
-        # "Compositional change","Technology adoption","Reduction of total production"
-        ac, at, ar, ab_tot = calc_abatement_analysis(sc)
-        AT = sum(at[t-p.t_period:t])
-        AC = sum(ac[t-p.t_period:t])
-
-        # Consumer Impact
-        S = sum([sum([j.qg_s[ti] for j in sec])
+    # Effectiveness & Economic Impact
+    E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
+    CA = sum([sum([(j.B[ti]-j.B[1])*j.qg[ti] for j in sec])
+                for ti in range(t-p.t_period, t)]) / E
+    CE = sum([sum([j.e[ti]*j.c_e[ti] for j in sec])
                 for ti in range(t-p.t_period, t)])
-        PL = sum([sum([j.qg_s[ti] * (j.pg[ti] - (j.c_e[ti] * j.A[ti] + j.B[ti])) for j in sec]) for ti in range(t-p.t_period, t)]
-                 ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
-        CC0 = sum([sum([j.s[ti] * j.pg[ti] for j in sec])
-                  for ti in range(t-p.t_period, t)]) / 10
-        CC = sum([sum([j.s[ti] * j.pg[ti] for j in sec]) for ti in range(t-p.t_period, t)]
-                 ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
-        R = sum([p.reg.R[ti] for ti in range(t-p.t_period, t)])
+    HHI = sum([sum([j.s[ti]**2 for j in sec])
+                for ti in range(t-p.t_period, t)])
 
-        # Others
-        PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
+    # Efficiency / Abatement Decomposition
+    # "Compositional change","Technology adoption","Reduction of total production"
+    ac, at, ar, ab_tot = calc_abatement_analysis(results)
+    AT = sum(at[t-p.t_period:t])
+    AC = sum(ac[t-p.t_period:t])
 
-        # Corresponds with measure_names
-        measures.append([p.mode, E, CA, CE, AT, AC,
-                        S, PL, HHI, CC0, CC, PE])
+    # Consumer Impact
+    S = sum([sum([j.qg_s[ti] for j in sec])
+            for ti in range(t-p.t_period, t)])
+    PL = sum([sum([j.qg_s[ti] * (j.pg[ti] - (j.c_e[ti] * j.A[ti] + j.B[ti])) for j in sec]) for ti in range(t-p.t_period, t)]
+                ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
+    CC0 = sum([sum([j.s[ti] * j.pg[ti] for j in sec])
+                for ti in range(t-p.t_period, t)]) / 10
+    CC = sum([sum([j.s[ti] * j.pg[ti] for j in sec]) for ti in range(t-p.t_period, t)]
+                ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
+    R = sum([p.reg.R[ti] for ti in range(t-p.t_period, t)])
+
+    # Others
+    PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
+
+    # Corresponds with measure_names
+    measures.append([p.mode, E, CA, CE, AT, AC,
+                    S, PL, HHI, CC0, CC, PE])
 
     return measures
 
-def evaluation_measures_cumulative(results,t):
-    print(1)
+def evaluation_measures_cumulative(measures_cum, results, t):
 
+    sec, p = results
 
-if analyse_single_run == True:
+    # Effectiveness & Economic Impact
+    E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
+    CA = sum([sum([(j.B[ti]-j.B[1])*j.qg[ti] for j in sec])
+                for ti in range(t-p.t_period, t)]) / E
+    CE = sum([sum([j.e[ti]*j.c_e[ti] for j in sec])
+                for ti in range(t-p.t_period, t)])
+    HHI = sum([sum([j.s[ti]**2 for j in sec])
+                for ti in range(t-p.t_period, t)])
 
-    print("Starting Single Run")
+    # Efficiency / Abatement Decomposition
+    # "Compositional change","Technology adoption","Reduction of total production"
+    ac, at, ar, ab_tot = calc_abatement_analysis(sc)
+    AT = sum(at[t-p.t_period:t])
+    AC = sum(ac[t-p.t_period:t])
 
-    param = []
-    for par in param_range['bounds']:
-        if single_run_mode == "mid-point":
-            param.append((par[0]+par[1])/2)
-        if single_run_mode == "upper-bound":
-            param.append(par[1])
-        if single_run_mode == "lower-bound":
-            param.append(par[0])
-        if single_run_mode == "random":
-            param.append(par[0]+(par[1]-par[0])*np.random.random())
+    # Consumer Impact
+    S = sum([sum([j.qg_s[ti] for j in sec])
+            for ti in range(t-p.t_period, t)])
+    PL = sum([sum([j.qg_s[ti] * (j.pg[ti] - (j.c_e[ti] * j.A[ti] + j.B[ti])) for j in sec]) for ti in range(t-p.t_period, t)]
+                ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
+    CC0 = sum([sum([j.s[ti] * j.pg[ti] for j in sec])
+                for ti in range(t-p.t_period, t)]) / 10
+    CC = sum([sum([j.s[ti] * j.pg[ti] for j in sec]) for ti in range(t-p.t_period, t)]
+                ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
+    R = sum([p.reg.R[ti] for ti in range(t-p.t_period, t)])
 
-    results = run_model(scenarios, param)
+    # Others
+    PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
 
-#plot_emissions_over_time(results)
+    measures_cum.append([p.mode, E, CA, CE, AT, AC,
+                    S, PL, HHI, CC0, CC, PE])
 
-measures = evaluation_measures(results)
+    return measures_cum
 
-print(np.shape(measures))
-
-
-
-
-def plot_measures_over_time(results, measures_values, measures_names):
+def plot_measures_over_time(results):
     """
     Plots multiple relevant measures over time.
 
@@ -589,20 +594,52 @@ def plot_measures_over_time(results, measures_values, measures_names):
     - measures_values (list of lists): Corresponding values of the measures over time.
     """
 
-    sec, p = results[0]  # Extract sector and parameters from results
-    time_steps = np.arange(1, p.T+1)  # Create time axis
+    measures_names = ["Scenario", "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
+                 "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price"]
+
+    measures_cum = []
+    sec, p = results[0]
+
+    for t in range(p.T+1):
+        evaluation_measures_cumulative(measures_cum, results, t)
+
+
+    measures_cum = np.array(measures_cum).T  # Transpose so each row corresponds to a measure
+
+    time_steps = np.arange(1, p.T+2)  # Create time axis
+
+    print(np.shape(time_steps))
+    print(np.shape(measures_cum))
 
     plt.figure(figsize=(12, 6))
 
     for i, measure in enumerate(measures_names):
-        plt.plot(time_steps, measures_values[i], label=measure, linewidth=2)
+        plt.plot(time_steps, measures_cum[i], label=measure, linewidth=2)
 
-    plt.axvline(x=p.t_start, color='black', linestyle='--', label='Policy Start')
+    plt.axvline(x=p.t_start, color='black', linestyle='dashed', label='Policy Start')
     plt.xlabel("Time Steps")
     plt.ylabel("Value")
-    plt.title("Key Measures Over Time Under Carbon Tax Policy")
+    plt.title("Cumulative Measures Over Time Under Carbon Tax Policy")
     plt.legend()
     plt.grid(True)
     plt.show()
 
+print("Starting Single Run")
 
+param = []
+for par in param_range['bounds']:
+    if single_run_mode == "mid-point":
+        param.append((par[0]+par[1])/2)
+    if single_run_mode == "upper-bound":
+        param.append(par[1])
+    if single_run_mode == "lower-bound":
+        param.append(par[0])
+    if single_run_mode == "random":
+        param.append(par[0]+(par[1]-par[0])*np.random.random())
+
+results = run_model(scenarios, param)
+
+measures = evaluation_measures(results)
+
+print((results[1].N))
+plot_emissions_over_time(results)
