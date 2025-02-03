@@ -12,10 +12,27 @@ from operator import itemgetter
 # from tabulate import tabulate
 # from datetime import date
 
-from SALib.sample import saltelli
+from ABM_plots import plot_emissions_over_time #, plot_measures_over_time
 
-from ABM_plots import plot_abatement_analysis
+#/////////////////////////////////////// KEY OUTPUTS OVERVIEW ///////////////////////////////////////#
+# The code simulates the impact of climate policy (e.g., carbon tax) on an economy with multiple firms.
+# Below are the key outputs tracked throughout the simulation:
 
+# 1. Emissions (sec.E) - Total emissions produced by the firms over time.
+# 2. Emission Tax (p.reg.pe) - The tax imposed on emissions, set by the regulator.
+# 3. Total Demand (sec.D) - Aggregate demand for products in the market.
+# 4. Market Concentration (HHI) - A measure of how concentrated the market is (calculated in evaluation_measures()).
+# 5. Technology Adoption (AT) - Tracks the amount of emissions reduction due to technology improvements.
+# 6. Compositional Change (AC) - Captures emissions changes due to shifts in market share between firms.
+# 7. Consumer Prices (j.pg) - Prices that consumers pay for goods, influenced by emission taxes.
+# 8. Production (j.qg) - Output level of each firm.
+# 9. Profits (PL) - The profitability of firms, affected by policy changes.
+# 10. Abatement Costs (CA) - The cost incurred by firms in reducing emissions.
+# 11. Policy Revenue (p.reg.R) - The total revenue collected from emissions taxes.
+# 12. Unmet Demand (j.Dl) - Demand that firms failed to meet due to production constraints.
+
+# The results are extracted from the "run_model()" function, where the agents (firms and regulator) interact.
+#///////////////////////////////////////////////////////////////////////////////////////////////////#
 
 #///////////////////////////////////////SETTINGS////////////////////////////////////////#
 
@@ -486,19 +503,17 @@ def calc_abatement_analysis(sc):
     return [ab_21, ab_1, ab_22, ab_tot]
 
 
-measure_names = ["Run", "Scenario", "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
-                 "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price", "Trading \n Volume"]
+measure_names = ["Scenario", "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
+                 "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price"]
 
 
-def evaluation_measures(results, i):
+def evaluation_measures(results):
 
     measures = []
 
     for sc in results:
-        sec0, p0 = results[0]
         sec, p = sc
         t = p.T+1
-
         # Effectiveness & Economic Impact
         E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
         CA = sum([sum([(j.B[ti]-j.B[1])*j.qg[ti] for j in sec])
@@ -527,13 +542,15 @@ def evaluation_measures(results, i):
 
         # Others
         PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
-        TV = sum([p.ex.u_t[ti] for ti in range(t)])
 
         # Corresponds with measure_names
-        measures.append([i, p.mode, E, CA, CE, AT, AC,
-                        S, PL, HHI, CC0, CC, PE, TV])
+        measures.append([p.mode, E, CA, CE, AT, AC,
+                        S, PL, HHI, CC0, CC, PE])
 
     return measures
+
+def evaluation_measures_cumulative(results,t):
+    print(1)
 
 
 if analyse_single_run == True:
@@ -553,5 +570,39 @@ if analyse_single_run == True:
 
     results = run_model(scenarios, param)
 
-print(results)
-#print(evaluation_measures(results,1))
+#plot_emissions_over_time(results)
+
+measures = evaluation_measures(results)
+
+print(np.shape(measures))
+
+
+
+
+def plot_measures_over_time(results, measures_values, measures_names):
+    """
+    Plots multiple relevant measures over time.
+
+    Parameters:
+    - results (list): The output of the run_model() function containing the sector (sec) and parameters (p).
+    - measures_names (list of str): Names of the measures to plot.
+    - measures_values (list of lists): Corresponding values of the measures over time.
+    """
+
+    sec, p = results[0]  # Extract sector and parameters from results
+    time_steps = np.arange(1, p.T+1)  # Create time axis
+
+    plt.figure(figsize=(12, 6))
+
+    for i, measure in enumerate(measures_names):
+        plt.plot(time_steps, measures_values[i], label=measure, linewidth=2)
+
+    plt.axvline(x=p.t_start, color='black', linestyle='--', label='Policy Start')
+    plt.xlabel("Time Steps")
+    plt.ylabel("Value")
+    plt.title("Key Measures Over Time Under Carbon Tax Policy")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
