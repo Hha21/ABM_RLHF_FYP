@@ -30,7 +30,7 @@ from ABM_plots import plot_emissions_over_time #, plot_measures_over_time
 #///////////////////////////////////////SETTINGS////////////////////////////////////////#
 
 # scenarios to compare
-scenarios = ["Tax"]
+use_RL_agent = False
 fixed_seed = False  # fixed-seed for random variables?
 # how to select from param_range: mid-point, upper-bound, lower-bound, random, id
 single_run_mode = "random"
@@ -159,6 +159,7 @@ class c_parameters:
         if statement not in self.log:
             self.log.append(statement)   
 
+#////////////////////////////////////////POLICIES///////////////////////////////////////#
 
 class c_regulator:
 
@@ -167,21 +168,46 @@ class c_regulator:
         self.emission_tax = False
         self.x = 0
 
-    def update_policy(self, sec, p, t):
+    def update_policy(self, sec, p, t, rl_agent = None):
+        self.emission_tax = True
         if t >= p.t_start:
             self.x = min((t - p.t_start)/p.t_period + 1, p.t_impl)
-            if p.emission_tax == True:
-                self.emission_tax = True
+
+            if use_RL_agent:
+                state = [sec.E[t-1], p.reg.pe[t-1]]
+                tax_action = rl_agent.act(state)
+                self.set_tax(sec, p, t, tax_action)
+            else:
                 self.set_tax(sec, p, t)
 
 
-    def set_tax(self, sec, p, t):
+    def set_tax(self, sec, p, t, tax_value = None):
 
-        self.pe[t:t+p.t_period] = p.tax * self.x / p.t_impl
+        if tax_value is not None:
+            self.pe[t:t+p.t_period] = tax_value  # RL-controlled tax
+        else:
+            self.pe[t:t+p.t_period] = p.tax * self.x / p.t_impl
         for j in sec:
             j.pe[t:t+p.t_period] = j.c_e[t:t +
                                          p.t_period] = self.pe[t:t+p.t_period]
 
+class RLAgent:
+    
+    def __init__(self, initial_tax = 0, tax_step = 0.1):
+        self.tax = initial_tax
+        self.tax_step = tax_step
+    
+    def act(self, state):
+
+        last_emissions, last_tax = state
+
+        if last_emissions > 0.5:
+            self.tax += self.tax_step
+        else:
+            self.tax = max(self.tax - self.tax_step / 2, 0)
+        
+        return self.tax
+        
 
 #////////////////////////////////////////SECTOR/////////////////////////////////////////#
 
@@ -342,12 +368,10 @@ def trade_commodities(sec, p, t):
 # other
 # round left until end of period
 
-
 def tl(p, t):
     return p.t_period - (t-1) % p.t_period
 
 # rounds passed within period
-
 
 def tp(p, t):
     return (t-1) % p.t_period
@@ -356,9 +380,7 @@ def tp(p, t):
 
 #///////////////////////////////////////DYNAMICS/////////////////////////////////////////#
 
-def run_model(param_values=0, calibrating=False, p_cal=0):
-
-    # results = []
+def run_model(param_values=0, calibrating=False, p_cal=0, use_RL_agent = False):
 
     # set up random parameters
     if calibrating == False:
@@ -374,15 +396,22 @@ def run_model(param_values=0, calibrating=False, p_cal=0):
     else:
         p = p_cal
 
-    # calibrate tax
-    if p.calibrate == True and calibrating == False:
-        calibrate_tax(p)
+    if not use_RL_agent:
+        # calibrate tax
+        if p.calibrate == True and calibrating == False:
+            calibrate_tax(p)
+            # 1, sector and firms
+            p.sec = sec = c_sector(p)
+            # 2, regulator
+            p.reg = reg = c_regulator(p)
 
-    # initialise agents
-    # 1, sector and firms
-    p.sec = sec = c_sector(p)
-    # 2, regulator
-    p.reg = reg = c_regulator(p)
+    else:
+        # 1, sector and firms
+        p.sec = sec = c_sector(p)
+        # 2, RL Policy, regulator
+        rl_agent = RLAgent()
+        p.reg = reg = c_regulator(p)
+    
 
     # run simulation
     t = 1
@@ -390,7 +419,7 @@ def run_model(param_values=0, calibrating=False, p_cal=0):
     while t <= p.T:
 
         if (t-1) % p.t_period == 0:
-            reg.update_policy(sec, p, t)
+            reg.update_policy(sec, p, t, rl_agent if use_RL_agent else None)
 
         sec.apply("set_expectations", p, t)
 
@@ -441,6 +470,7 @@ def calibrate_tax(p_cal):
 
     return
 
+#///////////////////////////////////////ANALYSIS/////////////////////////////////////////#
 
 def calc_abatement_analysis(sc):
 
@@ -619,7 +649,8 @@ for par in param_range['bounds']:
     if single_run_mode == "random":
         param.append(par[0]+(par[1]-par[0])*np.random.random())
 
-results = run_model(param)
+rl_agent = RLAgent
+results = run_model(param, False, 0, use_RL_agent)
 
 measures = evaluation_measures(results)
 
