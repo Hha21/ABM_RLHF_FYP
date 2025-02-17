@@ -1,36 +1,17 @@
 #///////////////////////////////////////IMPORTS/////////////////////////////////////////#
 
+from ctypes import sizeof
+from random import random
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-from operator import itemgetter
 
 from ABM_plots import plot_emissions_over_time #, plot_measures_over_time
-
-#/////////////////////////////////////// KEY OUTPUTS OVERVIEW ///////////////////////////////////////#
-# The code simulates the impact of climate policy (e.g., carbon tax) on an economy with multiple firms.
-# Below are the key outputs tracked throughout the simulation:
-
-# 1. Emissions (sec.E) - Total emissions produced by the firms over time.
-# 2. Emission Tax (p.reg.pe) - The tax imposed on emissions, set by the regulator.
-# 3. Total Demand (sec.D) - Aggregate demand for products in the market.
-# 4. Market Concentration (HHI) - A measure of how concentrated the market is (calculated in evaluation_measures()).
-# 5. Technology Adoption (AT) - Tracks the amount of emissions reduction due to technology improvements.
-# 6. Compositional Change (AC) - Captures emissions changes due to shifts in market share between firms.
-# 7. Consumer Prices (j.pg) - Prices that consumers pay for goods, influenced by emission taxes.
-# 8. Production (j.qg) - Output level of each firm.
-# 9. Profits (PL) - The profitability of firms, affected by policy changes.
-# 10. Abatement Costs (CA) - The cost incurred by firms in reducing emissions.
-# 11. Policy Revenue (p.reg.R) - The total revenue collected from emissions taxes.
-# 12. Unmet Demand (j.Dl) - Demand that firms failed to meet due to production constraints.
-
-# The results are extracted from the "run_model()" function, where the agents (firms and regulator) interact.
-#///////////////////////////////////////////////////////////////////////////////////////////////////#
 
 #///////////////////////////////////////SETTINGS////////////////////////////////////////#
 
 # scenarios to compare
-use_RL_agent = False
+use_RL_agent = True
 fixed_seed = False  # fixed-seed for random variables?
 # how to select from param_range: mid-point, upper-bound, lower-bound, random, id
 single_run_mode = "random"
@@ -376,71 +357,6 @@ def tl(p, t):
 def tp(p, t):
     return (t-1) % p.t_period
 
-
-
-#///////////////////////////////////////DYNAMICS/////////////////////////////////////////#
-
-def run_model(param_values=0, calibrating=False, p_cal=0, use_RL_agent = False):
-
-    # set up random parameters
-    if calibrating == False:
-        pr = c_parameters(param_values)
-        random_par = pr.generate_random_par()
-    
-
-    # load parameters
-    if calibrating == False:
-        p = c_parameters(param_values)
-        # p.load_sc(scenario)
-        p.load_random_par(random_par)
-    else:
-        p = p_cal
-
-    if not use_RL_agent:
-        # calibrate tax
-        if p.calibrate == True and calibrating == False:
-            calibrate_tax(p)
-            # 1, sector and firms
-            p.sec = sec = c_sector(p)
-            # 2, regulator
-            p.reg = reg = c_regulator(p)
-
-    else:
-        # 1, sector and firms
-        p.sec = sec = c_sector(p)
-        # 2, RL Policy, regulator
-        rl_agent = RLAgent()
-        p.reg = reg = c_regulator(p)
-    
-
-    # run simulation
-    t = 1
-
-    while t <= p.T:
-
-        if (t-1) % p.t_period == 0:
-            reg.update_policy(sec, p, t, rl_agent if use_RL_agent else None)
-
-        sec.apply("set_expectations", p, t)
-
-        sec.apply("abatement", p, t)
-        sec.production(p, t)
-        trade_commodities(sec, p, t)
-
-        # move to next round
-        t += 1
-
-    results = [sec, p]
-    # results.append([sec, p])
-
-    # check for errors
-    if print_errors == True and p.error == True and calibrating == False:
-        print("Errors found in Scenario")
-        print(p.log)
-
-    return results
-
-
 def calibrate_tax(p_cal):
 
     c = 0
@@ -512,7 +428,7 @@ def calc_abatement_analysis(sc):
     return [ab_21, ab_1, ab_22, ab_tot]
 
 
-measure_names = ["Scenario", "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
+measure_names = [ "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
                  "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price"]
 
 
@@ -558,24 +474,26 @@ def evaluation_measures(results):
 
     return measures
 
-def evaluation_measures_cumulative(measures_cum, results, t):
+def observations(state, results, t):
 
-    sec, p = results
+    # 1. Emissions. E
+    # 2. Technology Adoption. AT
+    # 3. Market Concentration. HHI
+    # 4. Profit Rate. PL
+    # 5. Sales Price. CC0
+    # 6. Consumer Impact. CC
 
     # Effectiveness & Economic Impact
+    sec, p = results
+
     E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
-    CA = sum([sum([(j.B[ti]-j.B[1])*j.qg[ti] for j in sec])
-                for ti in range(t-p.t_period, t)]) / E
-    CE = sum([sum([j.e[ti]*j.c_e[ti] for j in sec])
-                for ti in range(t-p.t_period, t)])
+
     HHI = sum([sum([j.s[ti]**2 for j in sec])
                 for ti in range(t-p.t_period, t)])
 
-    # Efficiency / Abatement Decomposition
     # "Compositional change","Technology adoption","Reduction of total production"
     ac, at, ar, ab_tot = calc_abatement_analysis(sec)
     AT = sum(at[t-p.t_period:t])
-    AC = sum(ac[t-p.t_period:t])
 
     # Consumer Impact
     S = sum([sum([j.qg_s[ti] for j in sec])
@@ -586,57 +504,201 @@ def evaluation_measures_cumulative(measures_cum, results, t):
                 for ti in range(t-p.t_period, t)]) / 10
     CC = sum([sum([j.s[ti] * j.pg[ti] for j in sec]) for ti in range(t-p.t_period, t)]
                 ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
-    R = sum([p.reg.R[ti] for ti in range(t-p.t_period, t)])
-
-    # Others
-    PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
-
-    measures_cum.append([E, CA, CE, AT, AC,
-                    S, PL, HHI, CC0, CC, PE])
-
-    return measures_cum
-
-def plot_measures_over_time(results):
-    """
-    Plots multiple relevant measures over time.
-
-    Parameters:
-    - results (list): The output of the run_model() function containing the sector (sec) and parameters (p).
-    - measures_names (list of str): Names of the measures to plot.
-    - measures_values (list of lists): Corresponding values of the measures over time.
-    """
-
-    measures_names = ["Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
-                 "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price"]
-
-    measures_cum = []
-    sec, p = results[0]
-
-    for t in range(p.T+1):
-        evaluation_measures_cumulative(measures_cum, results, t)
 
 
-    measures_cum = np.array(measures_cum).T  # Transpose so each row corresponds to a measure
+    state.append([E, AT, HHI, PL, CC0, CC])
 
-    time_steps = np.arange(1, p.T+2)  # Create time axis
+    return state
 
-    print(np.shape(time_steps))
-    print(np.shape(measures_cum))
+class ClimatePolicyEnv:
+    def __init__(self, param_values):
 
-    plt.figure(figsize=(12, 6))
+        """
+        Initializes the ClimatePolicyEnv.
 
-    for i, measure in enumerate(measures_names):
-        plt.plot(time_steps, measures_cum[i], label=measure, linewidth=2)
+        Parameters:
+            param_values (list): A list of parameters. These are used to instantiate c_parameters.
+            
+        Key parameters (from c_parameters):
+            TP         : Total number of rounds (simulation steps)
+            t_start    : Round at which the policy starts to be applied
+            t_period   : Length of a regulation period (e.g., 10 rounds)
+            t_impl     : Number of implementation periods (used to scale the policy gradually)
+            D0         : Maximum demand in the goods market
+            A0         : Baseline emission intensity for firms
+            B0         : Baseline production costs for firms
+            lamb_n     : Number of technological steps (abatement options)
+            I_d        : Desired inventory share (safety stock level)
+            tax        : Initial upper bound for the emission tax
+            Variable parameters:
+                N         : Number of firms in the sector
+                gamma     : Price sensitivity of demand
+                delAB     : Heterogeneity in production factors (affecting A0 and B0)
+                E_max     : Emission target
+                m0        : Initial mark-up rate for firms
+                theta     : Mark-up adaptation rate
+                chi       : Market share adaptation rate
+                dOmg      : Market share weight difference (affects pricing)
+                delta     : Permit price adaptation rate
+                delDelta  : Heterogeneity of permit price adaptation
+                lamb_max  : Maximum abatement potential factor
+                alpha     : Abatement cost factor
+                delAlpha  : Heterogeneity in abatement cost factor
+                eta       : Profitability target for abatement investments
+                delEta    : Heterogeneity in the profitability target
+                ex_mode   : Expectation mode (uniform/discriminate)
+                exp_mode  : Expectation type (trend, myopic, adaptive)
+        """
 
-    plt.axvline(x=p.t_start, color='black', linestyle='dashed', label='Policy Start')
-    plt.xlabel("Time Steps")
-    plt.ylabel("Value")
-    plt.title("Cumulative Measures Over Time Under Carbon Tax Policy")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+        # Init. parameter object (randomised)
+        self.params = c_parameters(param_values)
+        random_par = self.params.generate_random_par()
+        self.params.load_random_par(random_par)
 
-print("Starting Single Run")
+        # Create Sector (collection of firms) and Regulator
+        self.sector = c_sector(self.params)
+        self.regulator = c_regulator(self.params)
+
+        # Set sim. clock to t = 1
+        self.t = 1
+        self.done = False
+    
+    def reset(self):
+        """
+        Resets the environment for a new episode.
+        Randomizes parameters and resets the simulation clock.
+        Returns the initial observation.
+        """
+        self.params = c_parameters(self.params)
+        random_par = self.params.generate_random_par()
+        self.params.load_random_par(random_par)
+        self.sector = c_sector(self.params)
+        self.regulator = c_regulator(self.params)
+
+        self.t = 1
+        self.done = False
+        obs = self.get_state()
+        self.last_obs = obs
+    
+    def step(self, action):
+        """
+        Applies an action (e.g., a new tax level) and advances the simulation for one regulation period.
+        
+        Parameters:
+            action (float): The tax level to be applied for the current regulation period.
+        
+        Returns:
+            next_obs (np.array): The next state (observation) after the period.
+            reward (float): The reward obtained during the period.
+            done (bool): Whether the simulation has ended.
+            info (dict): Additional information (e.g., diagnostic data).
+        """
+
+        t_current = self.t
+        self.regulator.set_tax(self.sector, self.params, self.t, tax_value=action)
+
+        period = self.params.t_period
+        for _ in range(period):
+
+            if self.t > self.params.T:
+                self.done = True
+                break
+
+            # Each round: update expectations, abatement, production, and trading.
+            self.sector.apply("set_expectations", self.params, self.t)
+            self.sector.apply("abatement", self.params, self.t)
+            self.sector.production(self.params, self.t)
+            trade_commodities(self.sector, self.params, self.t)
+        
+            self.t += 1
+
+        next_obs = self.get_state()
+        # Compute reward based on the state changes over the period
+        reward = self.calculate_reward(t_current, self.t)
+        info = {"time" : self.t}
+        self.last_obs = next_obs
+
+        return next_obs, reward, self.done, info
+    
+    def get_state(self):
+        """
+        Constructs the current state observation.
+        For example, aggregates over the last regulation period:
+            - Total emissions (E)
+            - Technology adoption (AT)
+            - Market concentration (HHI)
+            - Profit rate (PL)
+            - Average sales price (CC0)
+            - Consumer impact (CC)
+        Returns:
+            state (np.array): A vector of selected observation features.
+        """
+
+        state = []
+        state = observations([], [self.sector, self.params], self.t)
+        return np.array(state[-1])      # Return last appended observation
+    
+    def calculate_reward(self, t_start, t_end):
+
+        total_emissions = self.sector.E[t_end] - self.sector.E[t_start]
+        reward = -total_emissions
+
+        return reward
+
+    def close(self):
+        pass
+        
+
+
+
+
+
+
+def run_model(param_values=0, calibrating=False, use_RL_agent = False):
+
+    # load parameters
+    p = c_parameters(param_values)
+    random_par = p.generate_random_par()
+    p.load_random_par(random_par)
+
+    # 1, sector and firms
+    p.sec = sec = c_sector(p)
+    # 2, RL Policy, regulator
+    rl_agent = RLAgent()
+    p.reg = reg = c_regulator(p)
+    
+
+    # run simulation
+    t = 1
+
+    while t <= p.T:
+
+        if (t-1) % p.t_period == 0:
+            reg.update_policy(sec, p, t, rl_agent if use_RL_agent else None)
+
+        sec.apply("set_expectations", p, t)
+
+        sec.apply("abatement", p, t)
+        sec.production(p, t)
+        trade_commodities(sec, p, t)
+
+        # move to next round
+        t += 1
+
+    results = [sec, p]
+    # results.append([sec, p])
+
+    # check for errors
+    if print_errors == True and p.error == True and calibrating == False:
+        print("Errors found in Scenario")
+        print(p.log)
+
+    return results
+
+
+
+
+# print("Starting Single Run")
 
 param = []
 for par in param_range['bounds']:
@@ -649,11 +711,12 @@ for par in param_range['bounds']:
     if single_run_mode == "random":
         param.append(par[0]+(par[1]-par[0])*np.random.random())
 
-rl_agent = RLAgent
-results = run_model(param, False, 0, use_RL_agent)
+# rl_agent = RLAgent
+# results = run_model(param, False, 0, use_RL_agent)
 
+# for i in range(len(measure_names)):
+#     print(f"\n Measure - {measure_names[i]}:" + f" {measures[0][i]}")
+
+results = run_model(param, False, use_RL_agent)
 measures = evaluation_measures(results)
-
-print(f"N firms is: {results[1].N}")
-print(f"Avg. Sales Price: {measures[0][8]}")
 plot_emissions_over_time(results)

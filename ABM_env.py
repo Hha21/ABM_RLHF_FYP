@@ -1,63 +1,10 @@
-# Init
-
-from select import select
+import re
+from statistics import mean
+from turtle import done
 import numpy as np
-# import pandas as pd
-import matplotlib.pyplot as plt
-
 import copy
-# import csv
 
-from operator import itemgetter
-# from tabulate import tabulate
-# from datetime import date
-
-from SALib.sample import saltelli
-
-# from SALib.analyze import sobol
-
-from ABM_plots import plot_abatement_analysis
-
-# /////////////////////////////////////////////////////////#
-# PLOTS
-
-
-# /////////////////////////////////////////////////////////#
-
-
-# Settings
-
-# scenarios to compare
-scenarios = ["No_Policy", "Grandfathering",
-             "Grandfathering2", "Auction", "Tax"]
-
-analyse_single_run = True  # show main dyn. for a single run
-single_run_details = False  # show time-series for all variables
-fixed_seed = True  # fixed-seed for random variables?
-# how to select from param_range: mid-point, upper-bound, lower-bound, random, id
-single_run_mode = "mid-point"
-glob_id = 1  # ID for single_run_mode
-
-do_multi_run = False  # run over variation of parameters
-analyse_multi_run = False  # calculate evaluation criteria
-plot_multi_run = True  # plot evaluation criteria
-analyse_sensitivity = False  # calculate indices
-sensitivity_strength = 1  # for sobol sensitivity analysis
-
-batch_separation = False  # separate multi-run into smaller batches
-batch_total = 5  # no. of batches
-batch_current = 0
-batch_combination = False  # combine batches
-
-print_errors = False
-fs = 13  # font size for plots
-
-# /////////////////////////////////////////////////////////#
-
-# Parameters
-
-if fixed_seed == True:
-    np.random.seed(42)
+from ABM_plots import plot_emissions_over_time
 
 param_range = {
     "num_vars": 17,
@@ -81,20 +28,25 @@ param_range = {
                [0, 3]]  # 16 - μ_1,μ_2,μ_3 - Expectation Rule
 }
 
+measure_names = [ "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
+                 "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price"]
 
 class c_parameters:
     def __init__(self, variable_parameters):
+
         # Fixed Params
-        self.TP = 30  # no. periods
-        self.t_start = 11  # delay until policy starts
+        self.TP = 50  # no. periods (30)
+        self.t_start = 10  # delay until policy starts (11)
         self.t_period = 10  # length of regulation period
-        self.t_impl = 10  # no. of implementation periods
+        self.t_impl = 30  # no. of implementation periods
         self.D0 = 1  # max. demand
         self.A0 = 1  # emission intensity
         self.B0 = 1  # prod. costs
         self.lamb_n = 20  # no. of technological steps
-        self.pe0 = 0.01  # initial permit price
         self.I_d = 0.1  # desired inventory share
+
+        self.mode = "Tax"
+        self.emission_tax = True
 
         # Expectation factor ranges
         exp_x_trend = [0.5, 1.0]
@@ -172,103 +124,43 @@ class c_parameters:
         self.error = True
         if statement not in self.log:
             self.log.append(statement)   
-    
-    # Scenarios 
-    def load_sc(self,scenario):
-        # Load Scenario
-        getattr(self,scenario)() 
 
-    def No_Policy(self):
-        self.mode = "No Policy"
-        self.emission_tax = False
-        self.permit_market = False
-
-    def Grandfathering(self):
-        self.mode = "Grandfathering (E)"
-        self.grandfathering_mode = "emissions"
-        self.emission_tax = False
-        self.permit_market = True
-
-    def Grandfathering2(self):
-        self.mode = "Grandfathering (V)"
-        self.grandfathering_mode = "volume"
-        self.emission_tax = False
-        self.permit_market = True
-
-    def Auction(self):
-        self.mode = "Auction"
-        self.emission_tax = False
-        self.permit_market = True
-
-    def Tax(self):
-        self.mode = "Tax"
-        self.emission_tax = True
-        self.permit_market = False
-
-
-class c_regulator:
+class RL_regulator:
 
     def __init__(self, p):
-        self.qp, self.pe, self.R = np.zeros((3, p.T+2))
-        self.permit_market = False
-        self.emission_tax = False
+        self.pe, self.R = np.zeros((2, p.T+2))
+        self.tax = 0.0                  #initial_tax
+        self.tax_step = 0.1             #tax_step
         self.x = 0
 
-    def update_policy(self, sec, p, t):
+    def update_policy(self, sec, p, t, rl_agent = None):
         if t >= p.t_start:
+
             self.x = min((t - p.t_start)/p.t_period + 1, p.t_impl)
-            if p.emission_tax == True:
-                self.emission_tax = True
-                self.set_tax(sec, p, t)
-            if p.permit_market == True:
-                self.permit_market = True
-                self.set_permits(sec, p, t)
+            state = [sec.E[t-1], p.reg.pe[t-1]]
+            tax_action = rl_agent.act(state)
+            self.set_tax(sec, p, t, tax_action)
 
-    def set_permits(self, sec, p, t):
+    def set_tax(self, sec, p, t, tax_value = None):
 
-        self.qp[t] = (p.sec.E[p.t_start-1] - (p.sec.E[p.t_start-1] -
-                      p.E_max) * self.x / p.t_impl) * p.t_period
-
-        for j in sec:
-            j.u_t[t] = 0      # Expiration of old permits and trading account
-
-        if p.mode == "Grandfathering (E)" or p.mode == "Grandfatheing (V)":
-
-            if p.grandfathering_mode == "emissions":
-
-                E_sum = sum([sec.E[ti-1] for ti in range(t-p.t_period, t)])
-
-                if E_sum > 0:
-                    for j in sec:
-                        j.u_i[t] = j.u_t[t] = self.qp[t] * \
-                            sum([j.e[ti-1]
-                                for ti in range(t-p.t_period, t)]) / E_sum
-                else:
-                    j.u_i[t] = self.qp[t]/p.N
-                    p.report_error("Error in set_permits(): E_sum = 0")
-
-            if p.grandfathering_mode == "volume":
-
-                Q_sum = sum([sec.Q[ti-1] for ti in range(t-p.t_period, t)])
-
-                if Q_sum > 0:
-                    for j in sec:
-                        j.u_i[t] = j.u_t[t] = self.qp[t] * \
-                            sum([j.qg[ti-1]
-                                for ti in range(t-p.t_period, t)]) / Q_sum
-                else:
-                    j.u_i[t] = self.qp[t]/p.N
-                    p.report_error("Error in set_permits(): Q_sum = 0")
-
-    def set_tax(self, sec, p, t):
-
-        self.pe[t:t+p.t_period] = p.tax * self.x / p.t_impl
+        if tax_value is not None:
+            self.pe[t:t+p.t_period] = tax_value  # RL-controlled tax
+        else:
+            self.pe[t:t+p.t_period] = p.tax * self.x / p.t_impl
         for j in sec:
             j.pe[t:t+p.t_period] = j.c_e[t:t +
                                          p.t_period] = self.pe[t:t+p.t_period]
+    
+    def act(self, state):
 
-# Sector
+        last_emissions, last_tax, E, HHI, PL, CC0, CC = state
 
+        if last_emissions > 0.5:
+            self.tax += self.tax_step
+        else:
+            self.tax = max(self.tax - self.tax_step / 2, 0)
+        
+        return self.tax
 
 class c_sector(list):
 
@@ -307,9 +199,6 @@ class c_sector(list):
         for obj in self:
             getattr(obj, method)(p, t)
 
-
-# Firm
-
 class c_firm:
 
     def __init__(self, p, j, sec):
@@ -335,8 +224,6 @@ class c_firm:
         self.pg[0] = p.B0[j] * (1+p.m0[j])  # sales price
         self.A[0] = self.A[1] = p.A0[j]  # emissions intensity
         self.B[0] = self.B[1] = p.B0[j]  # production costs
-        if p.permit_market == True:
-            self.pe[p.t_start] = p.pe0  # permit price
 
     def set_expectations(self, p, t):
 
@@ -357,25 +244,10 @@ class c_firm:
         else:
             self.m[t] = self.m[t-1]
 
-    def order_permits(self, p, t):
-
-        self.qp_d[t] = qp_d = self.qg_d[t] * self.A[t] * tl(p, t) - self.u_i[t]
-        if qp_d != 0:
-            order = [self.pe[t], qp_d, self]
-            p.ex.orders.append(order)
-
     def production(self, p, t):
 
         # Production
-        if p.reg.permit_market == True:
-            if self.A[t] * tl(p, t) > 0:
-                self.qg[t] = min(self.qg_d[t], self.u_i[t] /
-                                 (self.A[t] * tl(p, t)))
-            else:
-                p.report_error(
-                    "Error in production(): self.A[t] * tl(p,t) <= 0")
-        else:
-            self.qg[t] = self.qg_d[t]
+        self.qg[t] = self.qg_d[t]
 
         # Emissions
         self.e[t] = self.qg[t] * self.A[t]
@@ -388,10 +260,7 @@ class c_firm:
                          self.B[t]) * (1 + self.m[t]))
 
         # Tax collection and permit submission
-        if p.reg.emission_tax == True:
-            p.reg.R[t] += self.e[t] * self.pe[t]
-        if p.reg.permit_market == True:
-            self.u_i[t] = self.u_i[t+1] = self.u_i[t] - self.e[t]
+        p.reg.R[t] += self.e[t] * self.pe[t]
 
     def abatement(self, p, t):
 
@@ -408,178 +277,6 @@ class c_firm:
 
         self.A[t+1] = self.A[t] - o * a
         self.B[t+1] = self.B[t] + 0 * a
-
-
-# Markets
-
-class c_exchange:
-
-    def __init__(self, p):
-        self.orders = []  # market orders [Price, Quantity, Firm]
-        # market price, traded volume, trading rounds
-        self.pe, self.u_t, self.t_r = np.zeros((3, p.T+2))
-
-    def auction(self, sec, p, t):
-
-        np.random.shuffle(self.orders)  # shuffle list for same-price orders
-        # sort list by price (lowest first)
-        self.orders.sort(key=itemgetter(0))
-        bids = [x for x in self.orders if x[1] >= 0]
-        bids.reverse()  # highest first
-        Q = p.reg.qp[t]  # cap
-        sbids = []
-
-        # select succcessful bids
-        while len(bids) > 0 and Q > bids[0][1]:
-            Q -= bids[0][1]
-            sbids.append(bids[0])
-            self.pe[t] = bids[0][0]
-            bids.pop(0)
-
-        for b in sbids:
-            b[2].pe[t] *= (1 - b[2].delta)  # learning 1: successful orders
-
-        if len(bids) > 0 and Q < bids[0][1]:
-            self.pe[t] = bids[0][0]
-            sbids.append([bids[0][0], Q, bids[0][2]])
-            Q -= bids[0][1]
-
-        # process succesful bids
-        for b in sbids:
-            if p.ex_mode == "uniform":
-                pr = self.pe[t]
-            elif p.ex_mode == "discriminate":
-                pr = b[0]
-            b[2].u_i[t] += b[1]  # inventory
-            p.reg.R[t] += b[1] * pr  # revenue
-            b[2].u_t[t] += b[1]  # trade log
-            b[2].cu_t[t] += b[1] * pr  # trade log
-
-        # learning 2: unsuccessful orders
-        for b in bids:
-            b[2].pe[t] *= (1 + b[2].delta)
-
-        # grandfathereing, if any permits left
-        if Q > 0:
-
-            E_sum = sum([sec.E[ti-1] for ti in range(t-p.t_period, t)])
-
-            if E_sum > 0:
-                for j in sec:
-                    j.u_i[t] = j.u_t[t] = j.u_i[t] + Q * \
-                        sum([j.e[ti-1]
-                            for ti in range(t-p.t_period, t)]) / E_sum
-            else:
-                j.u_i[t] = j.u_i[t] + Q/p.N
-                p.report_error("Error in auction(): E_sum = 0")
-
-        self.orders = []  # reset orders
-
-    def clear(self, sec, p, t):
-
-        np.random.shuffle(self.orders)  # shuffle list for same-price orders
-        self.orders.sort(key=itemgetter(0))  # sort list by price low to high
-
-        # separate asks (low first) and bids (high first)
-        asks = [x for x in self.orders if x[1] < 0]
-        bids = [x for x in self.orders if x[1] >= 0]
-        bids.reverse()
-
-        self.t_r[t] += 1  # document new trading round
-        if len(bids) == 0 or len(asks) == 0:
-            self.active = False
-        else:
-            self.active = True
-
-        sbids = []
-        sasks = []
-
-        for i in sec:
-            i.u_td = 0  # trading volume of current trade interaction
-
-        # as long as higher bid than ask
-        while len(bids) > 0 and len(asks) > 0 and bids[0][0] > asks[0][0]:
-
-            b = bids[0]
-            a = asks[0]
-
-            if b[1] > - a[1]:  # if demand bigger than supply
-                q = - a[1]  # trade volume
-                b[1] -= q  # substraced from demand
-                sasks.append(asks[0])
-                asks.pop(0)
-            elif b[1] < - a[1]:
-                q = b[1]
-                a[1] += q
-                sbids.append(bids[0])
-                bids.pop(0)
-            else:  # volumes are equal
-                q = b[1]
-                sasks.append(asks[0])
-                sbids.append(bids[0])
-                bids.pop(0)
-                asks.pop(0)
-
-            # inventory update
-            b[2].u_i[t] += q
-            a[2].u_i[t] -= q
-
-            # trading log
-            self.pe[t] = a[0]  # market-price
-            pt_m = (b[0] + a[0]) / 2
-
-            self.u_t[t] += q
-            b[2].u_t[t] += q
-            a[2].u_t[t] -= q
-
-            a[2].u_td += q
-            b[2].u_td -= q
-
-            if p.ex_mode == "discriminate":
-                b[2].cu_t[t] += q * pt_m
-                a[2].cu_t[t] -= q * pt_m
-
-        # market price if there is no trade
-        if self.u_t[t] == 0 and len(asks) > 0:
-            self.pe[t] = asks[0][0]  # Only sellers
-        elif len(bids) > 0 and len(asks) == 0:
-            self.pe[t] = bids[0][0]  # Only buyers
-
-        if p.ex_mode == "uniform":
-            for b in sbids:
-                b[2].cu_t[t] += b[2].u_td * self.pe[t]
-            for a in sasks:
-                a[2].cu_t[t] += a[2].u_td * self.pe[t]
-
-        # learning
-        for b in sbids:
-            b[2].pe[t] *= (1 - b[2].delta)
-        for a in sasks:
-            a[2].pe[t] *= (1 + a[2].delta)
-        for b in bids:
-            b[2].pe[t] *= (1 + b[2].delta)
-        for a in asks:
-            a[2].pe[t] *= (1 - a[2].delta)
-
-        self.orders = []  # reset orders
-
-    def end_of_permit_trade(self, sec, p, t):
-
-        p.reg.pe[t] = self.pe[t]  # report to regulator
-
-        for j in sec:
-
-            # avg. permit costs
-            u = sum([j.u_t[ti] for ti in range(t-tp(p, t), t+1)])
-            if u > 0:
-                j.c_e[t] = sum([j.cu_t[ti]
-                               for ti in range(t-tp(p, t), t+1)]) / u
-
-            # keep permit trading price
-            j.pe[t] = j.pe[t+1] = max(0, j.pe[t])
-
-# Commodity Market
-
 
 def trade_commodities(sec, p, t):
 
@@ -615,321 +312,238 @@ def trade_commodities(sec, p, t):
 # other
 # round left until end of period
 
-
 def tl(p, t):
     return p.t_period - (t-1) % p.t_period
 
 # rounds passed within period
 
-
 def tp(p, t):
     return (t-1) % p.t_period
 
+class ClimatePolicyEnv:
+    def __init__(self, param_values):
 
-# Main Dynamics
+        """
+        Initializes the ClimatePolicyEnv.
 
-# Single Run
+        Parameters:
+            param_values (list): A list of parameters. These are used to instantiate c_parameters.
+            
+        Key parameters (from c_parameters):
+            TP         : Total number of rounds (simulation steps)
+            t_start    : Round at which the policy starts to be applied
+            t_period   : Length of a regulation period (e.g., 10 rounds)
+            t_impl     : Number of implementation periods (used to scale the policy gradually)
+            D0         : Maximum demand in the goods market
+            A0         : Baseline emission intensity for firms
+            B0         : Baseline production costs for firms
+            lamb_n     : Number of technological steps (abatement options)
+            I_d        : Desired inventory share (safety stock level)
+            tax        : Initial upper bound for the emission tax
+            Variable parameters:
+                N         : Number of firms in the sector
+                gamma     : Price sensitivity of demand
+                delAB     : Heterogeneity in production factors (affecting A0 and B0)
+                E_max     : Emission target
+                m0        : Initial mark-up rate for firms
+                theta     : Mark-up adaptation rate
+                chi       : Market share adaptation rate
+                dOmg      : Market share weight difference (affects pricing)
+                delta     : Permit price adaptation rate
+                delDelta  : Heterogeneity of permit price adaptation
+                lamb_max  : Maximum abatement potential factor
+                alpha     : Abatement cost factor
+                delAlpha  : Heterogeneity in abatement cost factor
+                eta       : Profitability target for abatement investments
+                delEta    : Heterogeneity in the profitability target
+                ex_mode   : Expectation mode (uniform/discriminate)
+                exp_mode  : Expectation type (trend, myopic, adaptive)
+        """
 
-def run_model(scenarios, param_values=0, calibrating=False, p_cal=0):
+        # Init. parameter object (randomised)
+        self.params = c_parameters(param_values)
+        random_par = self.params.generate_random_par()
+        self.params.load_random_par(random_par)
 
-    results = []
+        # Create Sector (collection of firms) and Regulator
+        self.sector = c_sector(self.params)
+        self.params.reg = self.regulator = RL_regulator(self.params)
 
-    # set up random parameters
-    if calibrating == False:
-        pr = c_parameters(param_values)
-        random_par = pr.generate_random_par()
+        # Set sim. clock to t = 1
+        self.t = 1
+        self.done = False
 
-    # iterate through all scenarios
-    for scenario in scenarios:
+        self.results = []
 
-        # load parameters
-        if calibrating == False:
-            p = c_parameters(param_values)
-            p.load_sc(scenario)
-            p.load_random_par(random_par)
-        else:
-            p = p_cal
+        ClimatePolicyEnv.model_run(self)
+    
+    def reset(self):
+        """
+        Resets the environment for a new episode.
+        Randomizes parameters and resets the simulation clock.
+        Returns the initial observation.
+        """
+        self.params = c_parameters(self.params)
+        random_par = self.params.generate_random_par()
+        self.params.load_random_par(random_par)
+        self.sector = c_sector(self.params)
+        self.regulator = RL_regulator(self.params)
 
-        # calibrate tax
-        if scenario == "Tax" and p.calibrate == True and calibrating == False:
-            calibrate_tax(p)
+        self.t = 1
+        self.done = False
+        obs = self.get_state()
+        self.last_obs = obs
+    
+    def step(self, action):
+        """
+        Applies an action (e.g., a new tax level) and advances the simulation for one regulation period.
+        
+        Parameters:
+            action (float): The tax level to be applied for the current regulation period.
+        
+        Returns:
+            next_obs (np.array): The next state (observation) after the period.
+            reward (float): The reward obtained during the period.
+            done (bool): Whether the simulation has ended.
+            info (dict): Additional information (e.g., diagnostic data).
+        """
 
-        # initialise agents
-        # 1, sector and firms
-        p.sec = sec = c_sector(p)
-        # 2, regulator
-        p.reg = reg = c_regulator(p)
-        # 3, trade exchange
-        p.ex = ex = c_exchange(p)
+        t_current = self.t
+        self.regulator.set_tax(self.sector, self.params, self.t, tax_value=action)
 
-        # run simulation
-        t = 1
+        period = self.params.t_period
+        breakloop = False
+        for _ in range(period):
 
-        while t <= p.T:
+            if self.t > self.params.T:
+                print(f"t at break: {self.t}")
+                breakloop = True
+                break
 
-            if (t-1) % p.t_period == 0:
-                reg.update_policy(sec, p, t)
+            # Each round: update expectations, abatement, production, and trading.
+            self.sector.apply("set_expectations", self.params, self.t)
+            self.sector.apply("abatement", self.params, self.t)
+            self.sector.production(self.params, self.t)
+            trade_commodities(self.sector, self.params, self.t)
+        
+            self.t += 1
 
-            sec.apply("set_expectations", p, t)
+        next_obs = self.get_state()
+        print(f"Obs at t = {self.t} ==    {next_obs}")
+        # Compute reward based on the state changes over the period
+        reward = self.calculate_reward(t_current, self.t-1)
+        info = {"time" : self.t}
+        self.last_obs = next_obs
 
-            if reg.permit_market == True:
+        if (breakloop):
+            self.done = True
 
-                ex.active = True
-                while ex.active == True:
+        return next_obs, reward, self.done, info
+    
+    def model_run(self):
 
-                    sec.apply("order_permits", p, t)
-                    if p.mode == "Auction" and (t-1) % p.t_period == 0:
-                        p.ex.auction(sec, p, t)
-                        ex.active = False
-                    else:
-                        ex.clear(sec, p, t)
+        while (not self.done):
 
-                    if ex.t_r[t] > 50:
-                        p.report_error(
-                            "Error in trading exchange loop: more than 50 trading rounds")
-                        ex.active = False
+            action = self.regulator.act(ClimatePolicyEnv.get_state(self))
+            self.step(action)
+        
+        self.results = [self.sector, self.params]
 
-                ex.end_of_permit_trade(sec, p, t)
+        return self.results
+    
+    def get_state(self):
+        """
+        Constructs the current state observation.
+        For example, aggregates over the last regulation period:
+            - Total emissions (E)
+            - Technology adoption (AT)
+            - Market concentration (HHI)
+            - Profit rate (PL)
+            - Average sales price (CC0)
+            - Consumer impact (CC)
+        Returns:
+            state (np.array): A vector of selected observation features.
+        """
 
-            sec.apply("abatement", p, t)
-            sec.production(p, t)
-            trade_commodities(sec, p, t)
+        state = []
+        state = ClimatePolicyEnv.observations([], [self.sector, self.params], self.t)
+        return np.array(state[-1])      # Return last appended observation
+    
+    def observations(state, results, t):
 
-            # move to next round
-            t += 1
-
-    results.append([sec, p])
-
-    # check for errors
-    if print_errors == True and p.error == True and calibrating == False:
-        print("Errors found in Scenario", scenario)
-        print(p.log)
-
-    return results
-
-# calibrate tax to reach target
-
-
-def calibrate_tax(p_cal):
-
-    c = 0
-    mintax = 0
-    maxtax = p_cal.tax
-
-    p_cal.tax = (mintax + maxtax) / 2
-
-    results = run_model(["Tax"], p_cal=p_cal, calibrating=True)
-    sec, p = results[0]
-
-    while abs(sec.E[p.T-1] - p.E_max) > p.calibration_threshold:
-        if sec.E[p.T-1] >= p.E_max:
-            mintax = p_cal.tax
-        else:
-            maxtax = p_cal.tax
-
-        p_cal.tax = (mintax + maxtax) / 2
-
-        results = run_model(["Tax"], p_cal=p_cal, calibrating=True)
-        sec, p = results[0]
-        c += 1
-
-        if c > p.calibration_max_runs:
-            p_cal.report_error("Error in calibrate_tax: c_max reached")
-            break
-
-    return
-
-# prepare evaluation measures - decomposition of abatement
-
-
-def calc_abatement_analysis(sc):
-
-    sec, p = sc
-
-    t0 = 1
-    T = p.T+1
-
-    delE = [sum([j.e[t]-j.e[t0] for j in sec]) for t in range(t0, T)]
-    ab_tot = [-x for x in delE]
-
-    delQ = [sum([j.qg[t]-j.qg[t0] for j in sec]) for t in range(t0, T)]
-
-    def x1(sec, j, t):  # Technology change
-        return (j.qg[t0] + j.qg[t]) / 2 * (j.A[t] - j.A[t0])
-
-    def x2(sec, j, t):  # Production change
-        return (j.A[t0] + j.A[t]) / 2 * (j.sq[t] * sec.Q[t] - j.sq[t0] * sec.Q[t0])
-
-    ab_1 = [- sum([x1(sec, j, t) for j in sec]) for t in range(t0, T)]
-    ab_2 = [- sum([x2(sec, j, t) for j in sec]) for t in range(t0, T)]
-
-    # Further decomposition of production level
-
-    def x21(sec, j, t):  # Compositional change
-        return (sec.Q[t0] + sec.Q[t]) / 2 * (j.sq[t] - j.sq[t0])
-
-    def x22(sec, j, t):  # Overall production level change
-        return (j.sq[t0] + j.sq[t]) / 2 * (sec.Q[t] - sec.Q[t0])
-
-    def A_mean(sec, j, t):
-        return (j.A[t0] + j.A[t]) / 2
-
-    ab_21 = [- sum([x21(sec, j, t) * A_mean(sec, j, t) for j in sec])
-             for t in range(t0, T)]  # Compositional change
-    ab_22 = [- sum([x22(sec, j, t) * A_mean(sec, j, t) for j in sec])
-             for t in range(t0, T)]  # Overall production level change
-
-    return [ab_21, ab_1, ab_22, ab_tot]
-
-# prepare evaluation measures - calculate measures
-
-
-measure_names = ["Run", "Scenario", "Emissions", "Abatement \n Costs", "Emissions \n Costs", "Technology \n Adoption", "Compositional \n Change",
-                 "Product \n Sales", "Profit \n rate", "Market \n Concentration", "Sales \n Price", "Consumer \n Impact", "Emissions \n Price", "Trading \n Volume"]
-
-
-def evaluation_measures(results, i):
-
-    measures = []
-
-    for sc in results:
-        sec0, p0 = results[0]
-        sec, p = sc
-        t = p.T+1
+        # 1. Emissions. E
+        # 2. Technology Adoption. AT
+        # 3. Market Concentration. HHI
+        # 4. Profit Rate. PL
+        # 5. Sales Price. CC0
+        # 6. Consumer Impact. CC
 
         # Effectiveness & Economic Impact
-        E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
-        CA = sum([sum([(j.B[ti]-j.B[1])*j.qg[ti] for j in sec])
-                 for ti in range(t-p.t_period, t)]) / E
-        CE = sum([sum([j.e[ti]*j.c_e[ti] for j in sec])
-                 for ti in range(t-p.t_period, t)])
-        HHI = sum([sum([j.s[ti]**2 for j in sec])
-                  for ti in range(t-p.t_period, t)])
 
-        # Efficiency / Abatement Decomposition
+        sec, p = results
+
+        E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
+
+        HHI = sum([sum([j.s[ti]**2 for j in sec])
+                    for ti in range(t-p.t_period, t)])
+
         # "Compositional change","Technology adoption","Reduction of total production"
-        ac, at, ar, ab_tot = calc_abatement_analysis(sc)
-        AT = sum(at[t-p.t_period:t])
-        AC = sum(ac[t-p.t_period:t])
+        # ac, at, ar, ab_tot = ClimatePolicyEnv.calc_abatement_analysis(sec)
+        # AT = sum(at[t-p.t_period:t])
 
         # Consumer Impact
         S = sum([sum([j.qg_s[ti] for j in sec])
                 for ti in range(t-p.t_period, t)])
         PL = sum([sum([j.qg_s[ti] * (j.pg[ti] - (j.c_e[ti] * j.A[ti] + j.B[ti])) for j in sec]) for ti in range(t-p.t_period, t)]
-                 ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
+                    ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
         CC0 = sum([sum([j.s[ti] * j.pg[ti] for j in sec])
-                  for ti in range(t-p.t_period, t)]) / 10
+                    for ti in range(t-p.t_period, t)]) / 10
         CC = sum([sum([j.s[ti] * j.pg[ti] for j in sec]) for ti in range(t-p.t_period, t)]
-                 ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
-        R = sum([p.reg.R[ti] for ti in range(t-p.t_period, t)])
+                    ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
 
-        # Others
-        PE = sum([p.reg.pe[ti] for ti in range(t-p.t_period, t)])
-        TV = sum([p.ex.u_t[ti] for ti in range(t)])
+        #Last Emissions & Tax
 
-        # Corresponds with measure_names
-        measures.append([i, p.mode, E, CA, CE, AT, AC,
-                        S, PL, HHI, CC0, CC, PE, TV])
+        LE = sec.E[t-1]
+        LT = p.reg.pe[t-1]
 
-    return measures
+        state.append([LE, LT, E, HHI, PL, CC0, CC])
+
+        return state
 
 
 
-if analyse_single_run == True:
+    def calculate_reward(self, t_start, t_end):
 
-    print("Starting Single Run")
+        #total_emissions = self.sector.E[t_end] - self.sector.E[t_start]
+        # print(f"Emissions at {t_start} --- {self.sector.E[t_start]} || Emissions at {t_end} --- {self.sector.E[t_end]}")
+        # print(f"Total Emissions at {t_start} to {t_end} = {total_emissions}")
 
-    param = []
-    for par in param_range['bounds']:
-        if single_run_mode == "mid-point":
-            param.append((par[0]+par[1])/2)
-        if single_run_mode == "upper-bound":
-            param.append(par[1])
-        if single_run_mode == "lower-bound":
-            param.append(par[0])
-        if single_run_mode == "random":
-            param.append(par[0]+(par[1]-par[0])*np.random.random())
-        if single_run_mode == "id":
-            param = saltelli.sample(param_range, sensitivity_strength)[glob_id]
+        mean_emissions = sum([self.sector.E[t_start + ti] for ti in range(t_end-t_start)]) / (t_end-t_start)
 
-    results = run_model(scenarios, param)
+        reward = -(mean_emissions)
+        
+        print(f"Reward from Period t = [{t_start}, {t_end}] is {reward}")
 
-    # Technological Optimism
-    param2 = copy.deepcopy(param)
-    param2[10] = 0.87
-    param2[11] = 1
-    results2 = run_model(scenarios, param2)
+        return reward
 
-    # Discriminate Auction
-    param3 = copy.deepcopy(param)
-    param3[12] = 2
-    results3 = run_model(scenarios, param3)
-
-    # Both of the above
-    param4 = copy.deepcopy(param)
-    param4[10] = 0.87
-    param4[11] = 1
-    param4[12] = 2
-    results4 = run_model(scenarios, param4)
-
-# perform multiple runs
+    def close(self):
+        pass
 
 
-# def multi_run(scenarios, param_range):
 
-#     # prepare sample
-#     param_values_multi = saltelli.sample(
-#         param_range, sensitivity_strength, calc_second_order=False)
+run_mode = "random"
 
-#     if batch_separation:
-#         batch_len = int(len(param_values_multi) / batch_total)
-#         param_values_multi = param_values_multi[batch_len *
-#                                                 batch_current:batch_len*(batch_current+1)]
+param = []
+for par in param_range['bounds']:
+    if run_mode == "mid-point":
+        param.append((par[0]+par[1])/2)
+    if run_mode == "upper-bound":
+        param.append(par[1])
+    if run_mode == "lower-bound":
+        param.append(par[0])
+    if run_mode == "random":
+        param.append(par[0]+(par[1]-par[0])*np.random.random())
 
-#     measures = []
-#     n_err = 0
-#     n_err_s = 0
-#     err = False
-
-#     for i, pv in enumerate(param_values_multi):
-#         if i == 0:
-#             print("Single run-time:")
-#             results = run_model(scenarios, param_values=pv)
-#             print("\nScheduled runs: ", len(param_values_multi))
-#         else:
-#             results = run_model(scenarios, param_values=pv)
-
-#         # check for errors and try to repeat
-#         err = False
-#         for sc in results:
-#             if sc[1].error == True:
-#                 err = True
-
-#         if err == True:
-#             n_err += 1
-#             c = 0
-#             while True:
-#                 results = run_model(scenarios, param_values=pv)
-
-#                 err = False
-#                 for sc in results:
-#                     if sc[1].error == True:
-#                         err = True
-
-#                 if err == False:
-#                     n_err_s += 1
-#                     break
-#                 else:
-#                     c += 1
-#                     if c > 10:
-#                         break
-
-#         measures.extend(evaluation_measures(results, i))
-#         print('\rDone: ' + str(i+1) + ' (' + str(n_err) +
-#               ' Errors, ' + str(n_err_s) + ' resolved)', end='')
-#     print("\n\nTotal run-time:")
-
-#     return measures
-
-# Scenario Run
-
+env = ClimatePolicyEnv(param)
+results = env.model_run()
+plot_emissions_over_time(results)
