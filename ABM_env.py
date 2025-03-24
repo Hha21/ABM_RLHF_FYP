@@ -1,5 +1,6 @@
 import re
 from statistics import mean
+from gym import spaces
 from turtle import done
 import numpy as np
 import copy
@@ -35,9 +36,9 @@ class c_parameters:
     def __init__(self, variable_parameters):
 
         # Fixed Params
-        self.TP = 50  # no. periods (30)
+        self.TP = 100  # no. periods (30)
         self.t_start = 10  # delay until policy starts (11)
-        self.t_period = 10  # length of regulation period
+        self.t_period = 5  # length of regulation period
         self.t_impl = 30  # no. of implementation periods
         self.D0 = 1  # max. demand
         self.A0 = 1  # emission intensity
@@ -321,7 +322,7 @@ def tp(p, t):
     return (t-1) % p.t_period
 
 class ClimatePolicyEnv:
-    def __init__(self, param_values):
+    def __init__(self):
 
         """
         Initializes the ClimatePolicyEnv.
@@ -360,6 +361,10 @@ class ClimatePolicyEnv:
                 exp_mode  : Expectation type (trend, myopic, adaptive)
         """
 
+        param_values = []
+        for par in param_range["bounds"]:
+            param_values.append(par[0] + (par[1] - par[0]) * np.random.random())
+
         # Init. parameter object (randomised)
         self.params = c_parameters(param_values)
         random_par = self.params.generate_random_par()
@@ -375,7 +380,12 @@ class ClimatePolicyEnv:
 
         self.results = []
 
-        ClimatePolicyEnv.model_run(self)
+        self.observation_space = spaces.Box(low = 0.0, high = 1.0, shape = (6,), dtype = np.float32)
+        self.action_space = spaces.Box(low = 0.0, high = 1.0, shape =  (1,), dtype = np.float32)
+        self.last_action = 0.0
+        self.step(self.last_action)
+        
+        print(f"Environment Initialised w. {self.params.N} firms, and Emissions Target {self.params.E_max}...")
     
     def reset(self):
         """
@@ -383,16 +393,31 @@ class ClimatePolicyEnv:
         Randomizes parameters and resets the simulation clock.
         Returns the initial observation.
         """
-        self.params = c_parameters(self.params)
+
+        param_values = []
+        for par in param_range["bounds"]:
+            param_values.append(par[0] + (par[1] - par[0]) * np.random.random())
+
+        self.params = c_parameters(param_values)    
         random_par = self.params.generate_random_par()
         self.params.load_random_par(random_par)
-        self.sector = c_sector(self.params)
-        self.regulator = RL_regulator(self.params)
 
+        # Create Sector (collection of firms) and Regulator
+        self.sector = c_sector(self.params)
+        self.params.reg = self.regulator = RL_regulator(self.params)
+
+        # Set sim. clock to t = 1
         self.t = 1
         self.done = False
-        obs = self.get_state()
+
+        self.last_action = 0.0
+        self.step(self.last_action)
+
+        obs = self.observe()
         self.last_obs = obs
+        #print(f"Environment Reset w. {self.params.N} firms, and Emissions Target {self.params.E_max}...")
+
+        return obs
     
     def step(self, action):
         """
@@ -408,142 +433,91 @@ class ClimatePolicyEnv:
             info (dict): Additional information (e.g., diagnostic data).
         """
 
+        #action = np.clip(action, self.action_space.low, self.action_space.high)
+        new_action = np.clip(self.last_action + action, 0, 3)
+        self.regulator.set_tax(self.sector, self.params, self.t, tax_value=new_action)
+
         t_current = self.t
-        self.regulator.set_tax(self.sector, self.params, self.t, tax_value=action)
 
         period = self.params.t_period
         breakloop = False
-        for _ in range(period):
 
-            if self.t > self.params.T:
-                print(f"t at break: {self.t}")
-                breakloop = True
-                break
+        if self.t <= self.params.T:
+            for _ in range(period):
 
-            # Each round: update expectations, abatement, production, and trading.
-            self.sector.apply("set_expectations", self.params, self.t)
-            self.sector.apply("abatement", self.params, self.t)
-            self.sector.production(self.params, self.t)
-            trade_commodities(self.sector, self.params, self.t)
-        
-            self.t += 1
+                if self.t > self.params.T:
+                    print(f"t at break: {self.t}")
+                    breakloop = True
+                    break
 
-        next_obs = self.get_state()
-        print(f"Obs at t = {self.t} ==    {next_obs}")
-        # Compute reward based on the state changes over the period
-        reward = self.calculate_reward(t_current, self.t-1)
+                # Each round: update expectations, abatement, production, and trading.
+                self.sector.apply("set_expectations", self.params, self.t)
+                self.sector.apply("abatement", self.params, self.t)
+                self.sector.production(self.params, self.t)
+                trade_commodities(self.sector, self.params, self.t)
+            
+                self.t += 1
+        else:
+            self.done = True
+
+        next_obs = self.observe()
+    
+        reward = self.calculate_reward(next_obs, new_action, self.last_action)
         info = {"time" : self.t}
         self.last_obs = next_obs
-
-        if (breakloop):
-            self.done = True
+        self.last_action = action
 
         return next_obs, reward, self.done, info
     
-    def model_run(self):
+    def observe(self):
 
-        while (not self.done):
+        # 1. Last Emissions, LE
+        # 2. Last Tax, LT
+        # 3. Total Emissions in Regulation Period, E
+        # 4. HHI (Market Concentration), HHI
+        # 5. Avg. Profit Rate, PL
+        # 6. Avg. Sales Price, CC0
 
-            action = self.regulator.act(ClimatePolicyEnv.get_state(self))
-            self.step(action)
+        sec, p, t = self.sector, self.params, self.t
         
-        self.results = [self.sector, self.params]
-
-        return self.results
-    
-    def get_state(self):
-        """
-        Constructs the current state observation.
-        For example, aggregates over the last regulation period:
-            - Total emissions (E)
-            - Technology adoption (AT)
-            - Market concentration (HHI)
-            - Profit rate (PL)
-            - Average sales price (CC0)
-            - Consumer impact (CC)
-        Returns:
-            state (np.array): A vector of selected observation features.
-        """
-
-        state = []
-        state = ClimatePolicyEnv.observations([], [self.sector, self.params], self.t)
-        return np.array(state[-1])      # Return last appended observation
-    
-    def observations(state, results, t):
-
-        # 1. Emissions. E
-        # 2. Technology Adoption. AT
-        # 3. Market Concentration. HHI
-        # 4. Profit Rate. PL
-        # 5. Sales Price. CC0
-        # 6. Consumer Impact. CC
-
-        # Effectiveness & Economic Impact
-
-        sec, p = results
-
-        E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
-
-        HHI = sum([sum([j.s[ti]**2 for j in sec])
-                    for ti in range(t-p.t_period, t)])
-
-        # "Compositional change","Technology adoption","Reduction of total production"
-        # ac, at, ar, ab_tot = ClimatePolicyEnv.calc_abatement_analysis(sec)
-        # AT = sum(at[t-p.t_period:t])
-
-        # Consumer Impact
-        S = sum([sum([j.qg_s[ti] for j in sec])
-                for ti in range(t-p.t_period, t)])
-        PL = sum([sum([j.qg_s[ti] * (j.pg[ti] - (j.c_e[ti] * j.A[ti] + j.B[ti])) for j in sec]) for ti in range(t-p.t_period, t)]
-                    ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
-        CC0 = sum([sum([j.s[ti] * j.pg[ti] for j in sec])
-                    for ti in range(t-p.t_period, t)]) / 10
-        CC = sum([sum([j.s[ti] * j.pg[ti] for j in sec]) for ti in range(t-p.t_period, t)]
-                    ) / 10 - sum([p.reg.R[ti] for ti in range(t-p.t_period, t)]) / S
-
-        #Last Emissions & Tax
-
         LE = sec.E[t-1]
         LT = p.reg.pe[t-1]
 
-        state.append([LE, LT, E, HHI, PL, CC0, CC])
+        E = sum([sec.E[ti] for ti in range(t-p.t_period, t)])
 
-        return state
+        HHI = sum([sum([j.s[ti]**2 for j in sec]) for ti in range(t-p.t_period, t)])
 
+        # Consumer Impact
+    
+        PL = sum([sum([j.qg_s[ti] * (j.pg[ti] - (j.c_e[ti] * j.A[ti] + j.B[ti])) for j in sec]) for ti in range(t-p.t_period, t)]
+                    ) / sum([sum([j.qg[ti] * (j.c_e[ti] * j.A[ti] + j.B[ti]) for j in sec]) for ti in range(t-p.t_period, t)])
+        CC0 = sum([sum([j.s[ti] * j.pg[ti] for j in sec])
+                    for ti in range(t-p.t_period, t)])
 
+        raw_obs = [LE, LT, E, HHI, PL, CC0]
+        max_vals = [1.0, 1.0, 10.0, 1.0, 1.0, 25.0]
+        norm_obs = [x / m for x, m in zip(raw_obs, max_vals)]
 
-    def calculate_reward(self, t_start, t_end):
+        #print(f"Observations at t={t}: {obs}")
+        #print(f"Normalised at: {normalised_obs}")
 
-        #total_emissions = self.sector.E[t_end] - self.sector.E[t_start]
-        # print(f"Emissions at {t_start} --- {self.sector.E[t_start]} || Emissions at {t_end} --- {self.sector.E[t_end]}")
-        # print(f"Total Emissions at {t_start} to {t_end} = {total_emissions}")
+        return np.array(norm_obs, dtype=np.float32)
 
-        mean_emissions = sum([self.sector.E[t_start + ti] for ti in range(t_end-t_start)]) / (t_end-t_start)
+    @staticmethod
+    def calculate_reward(obs, action, last_action):
+        emissions = obs[2]
+        target = 0.2
 
-        reward = -(mean_emissions)
-        
-        print(f"Reward from Period t = [{t_start}, {t_end}] is {reward}")
+        emissions_score = 1.0 - (emissions - target) ** 2      
+        stability_score = 1.0 - (action - last_action) ** 2    
 
-        return reward
+        emissions_score = max(0.0, emissions_score)
+        stability_score = max(0.0, stability_score)
+
+        return 10 * emissions_score + 1.0 * stability_score
 
     def close(self):
         pass
-
-
-
-run_mode = "random"
-
-param = []
-for par in param_range['bounds']:
-    if run_mode == "mid-point":
-        param.append((par[0]+par[1])/2)
-    if run_mode == "upper-bound":
-        param.append(par[1])
-    if run_mode == "lower-bound":
-        param.append(par[0])
-    if run_mode == "random":
-        param.append(par[0]+(par[1]-par[0])*np.random.random())
-
-env = ClimatePolicyEnv(param)
-results = env.model_run()
-plot_emissions_over_time(results)
+    
+    def render(self):
+        plot_emissions_over_time([self.sector, self.params])
