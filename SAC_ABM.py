@@ -71,18 +71,17 @@ class SAC(nn.Module):
     def get_action(self, state, deterministic = False):
         #predict action by state
 
-        if deterministic:
-            state = torch.FloatTensor(state).unsqueeze(0)
-            means, log_stds = self.pi_model(state).chunk(2, dim=-1)
-            action = means
-
-
         state = torch.FloatTensor(state).unsqueeze(0)
-        action, _ = self.predict_actions(state)
-        action = action.squeeze(1).detach().numpy()
-        max_step = 0.5
 
-        return np.clip(action, -1 , 1) * max_step  
+        if deterministic:
+            means, _ = self.pi_model(state).chunk(2, dim=-1)
+            action = means.squeeze(1).detach().numpy() 
+        else:
+            action, _ = self.predict_actions(state)
+            action = action.squeeze(1).detach().numpy()
+
+        max_step = 0.5
+        return np.clip(action, -1, 1) * max_step
 
 
     def update_model(self, loss, optimizer, model = None, target_model = None):
@@ -154,7 +153,7 @@ def train(env, agent, episode_n, total_rewards = [], rollout_len = 200):
 
         for t in range(rollout_len):
 
-            action = agent.get_action(state)
+            action = agent.get_action(state, deterministic = True)
 
             next_state, reward, done, _ = env.step(action)
 
@@ -193,10 +192,8 @@ def rollout_deterministic(env, agent, rollout_len=200, render=True):
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
 
-agent = SAC(state_dim, action_dim, alpha = 0.5, batch_size = 256, gamma = 0.9, pi_lr=1e-4, q_lr=2e-4)
+agent = SAC(state_dim, action_dim, alpha = 0.4, batch_size = 128, gamma = 0.95, pi_lr=1e-4, q_lr=2e-4)
 train(env, agent, episode_n=1000) 
 
 rollout_deterministic(env, agent)
 env.render()
-
-                        

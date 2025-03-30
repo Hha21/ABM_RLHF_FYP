@@ -38,7 +38,7 @@ class c_parameters:
         # Fixed Params
         self.TP = 100  # no. periods (30)
         self.t_start = 10  # delay until policy starts (11)
-        self.t_period = 5  # length of regulation period
+        self.t_period = 10  # length of regulation period
         self.t_impl = 30  # no. of implementation periods
         self.D0 = 1  # max. demand
         self.A0 = 1  # emission intensity
@@ -508,13 +508,15 @@ class ClimatePolicyEnv:
         emissions = obs[2]
         target = 0.2
 
-        emissions_score = 1.0 - (emissions - target) ** 2      
-        stability_score = 1.0 - (action - last_action) ** 2    
+        deviation = emissions - target
 
-        emissions_score = max(0.0, emissions_score)
-        stability_score = max(0.0, stability_score)
+        # emissions_reward = -np.log(1 + 50 * deviation ** 2)
+        # smoothness_penalty = -0.5 * (action - last_action) ** 2
 
-        return 10 * emissions_score + 1.0 * stability_score
+        emissions_reward = -np.exp(10 * abs(deviation)) + 1
+        smoothness_penalty = -0.2 * (action - last_action)**2
+
+        return emissions_reward + smoothness_penalty
 
     def close(self):
         pass
