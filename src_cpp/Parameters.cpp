@@ -57,11 +57,6 @@ Parameters::Parameters() {
 
     Parameters::generateRandomPar();
 
-    for (int i = 0; i < this->lamb_n; ++i) {
-        int firm = 0;
-        std::cout << "ABATEMENT FOR FIRM " << firm << " : [a,b] = [" << this->lamb[0][i][0] << " ," << this->lamb[0][i][1] << "] " << std::endl;
-    }
-
     std::cout << "INIT WITH " << this->N << " FIRMS!" << std::endl;
 }
 
