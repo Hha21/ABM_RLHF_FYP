@@ -86,7 +86,7 @@ class Parameters {
         std::vector<double> m0;
         double theta;
         double chi;
-        std::vector<double> omg;
+        std::array<double, 2> omg;
         double delta;
         double delDelta;
         double lamb_max;

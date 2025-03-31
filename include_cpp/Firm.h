@@ -42,8 +42,6 @@ class Firm {
         std::vector<double> m;      // Mark-up rate over production costs
         std::vector<double> A;      // Emission intensity (emissions per unit produced)
         std::vector<double> B;      // Unit production costs (excluding abatement costs)
-        std::vector<double> pe;     // Permit price expectation
-        std::vector<double> pe2;    // Secondary permit price expectation (if used)
         std::vector<double> qp_d;   // Desired permit quantity
         std::vector<double> u_i;    // Investment utilization rate
         std::vector<double> u_t;    // Total capacity utilization rate
@@ -55,8 +53,8 @@ class Firm {
 
         // FIRM METHODS
         void setExpectations(const int t);
-        double production(const int t);     //Returns tax-revenue from firm j
-
+        double production(const int t, const double pe);     //Returns tax-revenue from firm j
+        void abatement(const int t, const double pe);
 
 };
 

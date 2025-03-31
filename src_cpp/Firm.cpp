@@ -28,8 +28,6 @@ Firm::Firm(const Parameters& p, int firmIndex) :
     this->m.resize(T_plus);
     this->A.resize(T_plus);
     this->B.resize(T_plus);
-    this->pe.resize(T_plus);
-    this->pe2.resize(T_plus);
     this->qp_d.resize(T_plus);
     this->u_i.resize(T_plus);
     this->u_t.resize(T_plus);
@@ -73,7 +71,7 @@ void Firm::setExpectations(const int t) {
     std::cout << "EXPECTATION SET FIRM " << this->j << std::endl;
 }
 
-double Firm::production(const int t) {
+double Firm::production(const int t, const double pe) {
     // Step 1: Produce as planned
     this->qg[t] = this->qg_d[t];
 
@@ -84,8 +82,26 @@ double Firm::production(const int t) {
     this->qg_I[t] = this->qg_I[t - 1] + this->qg[t];
 
     // Step 4: Calculate product price
-    this->pg[t] = std::max(0.0, (this->A[t] * this->pe[t] + this->B[t]) * (1.0 + this->m[t]));
+    this->pg[t] = std::max(0.0, (this->A[t] * pe + this->B[t]) * (1.0 + this->m[t]));
 
     // Step 5: Return tax amount = emissions × permit price
-    return this->e[t] * this->pe[t];
+    return this->e[t] * pe;
+}
+
+void Firm::abatement(const int t, const double pe) {
+
+    double o = 0.0;
+
+    // CHECK IF ABATEMENT OPTIONS AVAILABLE
+    if (this->lamb.size() > 0) {
+        const std::array<double,2> ab = this->lamb[0];          // BEST OPTION
+        const double MAC = ab[1] / ab[0];
+
+        if (MAC * (1 + this->eta) <= pe && this->s[t-1] > 0.01) {
+            o = 1.0;
+            this->lamb.erase(this->lamb.begin());               //REMOVE USED OPTION
+        }
+        this->A[t+1] = this->A[t] - o * ab[0];
+        this->B[t+1] = this->B[t] + o * ab[1];
+    }
 }

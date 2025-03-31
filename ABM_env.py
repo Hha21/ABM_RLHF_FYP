@@ -277,7 +277,7 @@ class c_firm:
                 self.lamb.pop(0)  # remove used option from list
 
         self.A[t+1] = self.A[t] - o * a
-        self.B[t+1] = self.B[t] + 0 * a
+        self.B[t+1] = self.B[t] + o * a
 
 def trade_commodities(sec, p, t):
 

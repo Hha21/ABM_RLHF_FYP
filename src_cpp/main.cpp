@@ -15,7 +15,8 @@ int main() {
 
     for (int t = 0; t < 10; ++t) {
         firm1.setExpectations(t);
-        revenue += firm1.production(t);
+        revenue += firm1.production(t, 1.0);
+        firm1.abatement(t, 1.0);
     }
 
     std::cout << "REVENUE: " << revenue << std::endl;
