@@ -29,7 +29,7 @@ class Firm {
 
         //DYNAMIC VARIABLES
         std::vector<double> s;      // Firm market share
-        std::vector<double> sq;     // Squared market share (HHI calculation)
+        std::vector<double> sq;     // Squared market share
         std::vector<double> f;      // Fixed (investment) costs per period
         std::vector<double> e;      // Emissions per period
         std::vector<double> qg;     // Actual goods produced per period

@@ -39,9 +39,11 @@ class Parameters {
         int t_start = 1;       
         int t_period = 10;      //Length of one regulation period
         int t_impl = 10;        //Num. implementation periods
-        int D0 = 1;
-        int A0 = 1;
-        int B0 = 1;
+
+        double D0 = 1.0;
+        double A0 = 1.0;
+        double B0 = 1.0;
+
         int lamb_n = 20;
         double I_d = 0.1;
 

@@ -76,14 +76,15 @@ double Firm::production(const int t, const double pe) {
 
     // Step 2: Calculate emissions
     this->e[t] = this->qg[t] * this->A[t];
-   // std::cout << "EMISSIONS FIRM " << this->j << " = " << this->qg[t] << " * " << this->A[t] << std::endl;
+
+    // std::cout << "FIRM " << this->exp_mode << " | at time " << t << " | QUANTITY * A : " << this->qg[t] << " * " << this->A[t] << std::endl;
 
     // Step 3: Update inventory
     this->qg_I[t] = this->qg_I[t - 1] + this->qg[t];
 
     // Step 4: Calculate product price
-    this->pg[t] = std::max(0.0, (this->A[t] * pe + this->B[t]) * (1.0 + this->m[t]));
-
+    this->pg[t] = std::max(0.0, (this->A[t] * pe + this->B[t]) * (1.0 + this->m[t])); // GOES TO ZERO FOR SOME
+ 
     // Step 5: Return tax amount = emissions × permit price
     return this->e[t] * pe;
 }
@@ -103,5 +104,8 @@ void Firm::abatement(const int t, const double pe) {
         }
         this->A[t+1] = this->A[t] - o * ab[0];
         this->B[t+1] = this->B[t] + o * ab[1];
+    } else {
+        this->A[t+1] = this->A[t];
+        this->B[t+1] = this->B[t];
     }
 }
