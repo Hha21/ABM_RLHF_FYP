@@ -36,7 +36,7 @@ class Parameters {
     public:
     
         int TP = 30;            // Num Periods
-        int t_start = 0;       //Delay Until Policy
+        int t_start = 1;       
         int t_period = 10;      //Length of one regulation period
         int t_impl = 10;        //Num. implementation periods
         int D0 = 1;

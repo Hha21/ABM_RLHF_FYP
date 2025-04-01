@@ -1,8 +1,18 @@
 #include "../include_cpp/Environment.h"
 
-std::tuple<std::vector<double>, double, bool> Environment::step(double action) {
+std::tuple<std::vector<double>, double, bool> Environment::step(const double action) {
 
-    double new_action = std::clamp(this->last_action + action, 0.0, this->tax_limit);
+    // double new_action = std::clamp(this->last_action + action, 0.0, this->tax_limit);
+
+    double new_action;
+
+    if (this->last_action + action > this->tax_limit) {
+        new_action = this->tax_limit;
+    } else if (this->last_action + action < 0.0) {
+        new_action = 0.0;
+    } else {
+        new_action = this->last_action + action;
+    }
 
     int period = this->params.t_period;
 
@@ -17,11 +27,11 @@ std::tuple<std::vector<double>, double, bool> Environment::step(double action) {
     std::vector<double> next_obs = Environment::observe();
     double reward = Environment::calculateReward(next_obs, new_action, last_action);
     last_action = new_action;
-
+    
     done = (t > this->params.T);
-    if (done) {
-        Environment::outputTxt();
-    }
+    // if (done) {
+    //     Environment::outputTxt();
+    // }
 
     this->Markov = {next_obs, reward, done};
     return this->Markov;
@@ -64,7 +74,7 @@ std::vector<double> Environment::observe() {
     return obs;
 }
 
-double Environment::calculateReward(const std::vector<double>& obs, double action, double last_action) {
+double Environment::calculateReward(const std::vector<double>& obs, const double action, const double last_action) {
     double emissions = obs[2];
     double target = 0.2;
     double deviation = emissions - target;
@@ -95,5 +105,17 @@ Environment::Environment() : params(), sector(params) {
 }
 
 void Environment::outputTxt() {
+    const std::string fileName = "EmissionsVsTaxData.txt";
+    this->emissionsVsTax.open(fileName);
+    this->emissionsVsTax << "EMISSIONS TAX\n";
 
+    int start = this->params.t_start;
+    int end = this->params.T;
+
+    for (int i = start; i < end; ++i) {
+        this->emissionsVsTax << this->sector.E[i] << " " 
+                                << this->tax_actions[i] << "\n";
+    }
+    this->emissionsVsTax.close();
+    std::cout << "DATA WRITTEN TO " << fileName << std::endl;
 }

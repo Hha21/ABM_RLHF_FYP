@@ -24,7 +24,7 @@ Sector::Sector(Parameters& p) {
     }
 
     this->D[0] = this->params->D0 * std::exp(-price_weighted_sum * this->params->gamma);
-
+    std::cout << "INITIAL DEMAND: " << this->D[0] << std::endl;
     //ALLOCATE INITIAL DEMAND
     for (Firm& firm : this->firms) {
         firm.D[0] = firm.qg_d[0] = firm.qg[0] = firm.qg_s[0] = firm.s[0] * this->D[0];

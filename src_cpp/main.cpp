@@ -6,16 +6,17 @@ int main() {
 
     Environment env = Environment();
 
+    int t0 = env.params.t_start;
     int t_max = env.params.T;
-    
+    double action = 0.1;
     MDP Markov;
     
-    for (int episode = 0; episode < 400; ++episode) {
-        for (int t = 1; t < t_max; ++t) {
-        Markov = env.step(0.0);
-        }
-        env.reset();
+
+    while (!env.done) {
+        Markov = env.step(action);
     }
+    env.outputTxt();
+    
 
     std::cout << "RUNNING TERMINATED!" << std::endl;
     return 0;

@@ -10,7 +10,7 @@ from ABM_plots import plot_emissions_over_time
 param_range = {
     "num_vars": 17,
     "names": ['$N$', '$gamma$', '$delA_0$,$delB_0$', '$e^*$', '$m_0$', '$theta$', '$chi$', '$omg_1/omg_2$', '$delta$', '$delDelta$', '$alpha_{pot}$', '$alpha_{costs}$', '$delAlpha_{costs}$', '$eta$', '$delEta$', '$psi$', '$mu_1$,$mu_2$,$mu_3$'],
-    "bounds": [[30, 50],  # 00 - N - Number of firms
+    "bounds": [[50, 50],  # 00 - N - Number of firms [30, 50]
                [0.1, 0.5],  # 01 - γ - Price sensitivity of demand
                [0, 0.4],  # 02 - ΔA_0,ΔB_0 - Heterogeneity of production factors
                [0.1, 0.2],  # 03 - e^* - Emission target
@@ -36,7 +36,7 @@ class c_parameters:
     def __init__(self, variable_parameters):
 
         # Fixed Params
-        self.TP = 10  # no. periods (30)
+        self.TP = 30  # no. periods (30)
         self.t_start = 10  # delay until policy starts (11)
         self.t_period = 10  # length of regulation period
         self.t_impl = 30  # no. of implementation periods
@@ -247,7 +247,7 @@ class c_firm:
     def set_expectations(self, p, t):
 
         # set desired output
-        if self.exp_mode == "trend" and t <= 1:
+        if self.exp_mode == "trend" and t > 1:
             self.qg_d[t] = self.D[t-1] + self.x * (self.D[t-1] - self.D[t-2])
         elif self.exp_mode == "adaptive":
             self.qg_d[t] = self.x * self.D[t-1] + (1 - self.x) * self.qg_d[t-1]
@@ -454,19 +454,10 @@ class ClimatePolicyEnv:
         #action = np.clip(action, self.action_space.low, self.action_space.high)
         new_action = np.clip(self.last_action + action, 0, 3)
         self.regulator.set_tax(self.sector, self.params, self.t, tax_value=new_action)
-
-        t_current = self.t
-
         period = self.params.t_period
-        breakloop = False
 
         if self.t <= self.params.T:
             for _ in range(period):
-
-                if self.t > self.params.T:
-                    print(f"t at break: {self.t}")
-                    breakloop = True
-                    break
 
                 # Each round: update expectations, abatement, production, and trading.
                 self.sector.apply("set_expectations", self.params, self.t)
@@ -483,7 +474,7 @@ class ClimatePolicyEnv:
         reward = self.calculate_reward(next_obs, new_action, self.last_action)
         info = {"time" : self.t}
         self.last_obs = next_obs
-        self.last_action = action
+        self.last_action = new_action
 
         return next_obs, reward, self.done, info
     
@@ -545,6 +536,6 @@ class ClimatePolicyEnv:
 
 env = ClimatePolicyEnv() 
 
-for i in range(10) :
-    env.step(1)
+while (not env.done) :
+    env.step(0.1)
 env.render()

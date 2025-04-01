@@ -43,6 +43,7 @@ Firm::Firm(const Parameters& p, int firmIndex) :
 
 void Firm::setExpectations(const int t) {
     // Set desired output based on expectation mode
+
     if (this->exp_mode == "trend") {
         if (t > 1) {
             this->qg_d[t] = this->D[t - 1] + this->x * (this->D[t - 1] - this->D[t - 2]);
@@ -52,7 +53,7 @@ void Firm::setExpectations(const int t) {
     }
     else if (this->exp_mode == "adaptive") {
         this->qg_d[t] = this->x * this->D[t - 1] + (1.0 - this->x) * this->qg_d[t - 1];
-    }
+    } 
     else { // default to myopic
         this->qg_d[t] = this->D[t - 1];
     }
@@ -66,6 +67,7 @@ void Firm::setExpectations(const int t) {
     } else {
         this->m[t] = this->m[t - 1];
     }
+
 }
 
 double Firm::production(const int t, const double pe) {
@@ -74,6 +76,7 @@ double Firm::production(const int t, const double pe) {
 
     // Step 2: Calculate emissions
     this->e[t] = this->qg[t] * this->A[t];
+   // std::cout << "EMISSIONS FIRM " << this->j << " = " << this->qg[t] << " * " << this->A[t] << std::endl;
 
     // Step 3: Update inventory
     this->qg_I[t] = this->qg_I[t - 1] + this->qg[t];

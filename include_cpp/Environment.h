@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <vector>
 
 typedef std::tuple<std::vector<double>, double, bool> MDP;
@@ -23,6 +24,8 @@ class Environment {
 
         const std::array<double, 6> max_vals = {1.0, 1.0, 10.0, 1.0, 1.0, 25.0};
 
+        std::ofstream emissionsVsTax;
+
     public: 
         Parameters params;
         Sector sector;
@@ -34,9 +37,9 @@ class Environment {
 
         Environment();
 
-        MDP step(double action);
+        MDP step(const double action);
         std::vector<double> observe();
-        double calculateReward(const std::vector<double>& obs, double action, double last_action);
+        double calculateReward(const std::vector<double>& obs, const double action, const double last_action);
 
         void outputTxt();
 
