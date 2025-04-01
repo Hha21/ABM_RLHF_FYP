@@ -1,24 +1,22 @@
 #include <iostream>
-#include "../include_cpp/Parameters.h"
-#include "../include_cpp/Firm.h"
+#include "../include_cpp/Environment.h"
 
 
 int main() {
 
-    std::cout << "Hello World!" << std::endl;
+    Environment env = Environment();
 
-    Parameters param = Parameters();
-
-    Firm firm1 = Firm(param, 0);
-
-    double revenue = 0;
-
-    for (int t = 0; t < 10; ++t) {
-        firm1.setExpectations(t);
-        revenue += firm1.production(t, 1.0);
-        firm1.abatement(t, 1.0);
+    int t_max = env.params.T;
+    
+    MDP Markov;
+    
+    for (int episode = 0; episode < 400; ++episode) {
+        for (int t = 1; t < t_max; ++t) {
+        Markov = env.step(0.0);
+        }
+        env.reset();
     }
 
-    std::cout << "REVENUE: " << revenue << std::endl;
+    std::cout << "RUNNING TERMINATED!" << std::endl;
     return 0;
 }

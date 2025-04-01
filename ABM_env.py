@@ -36,7 +36,7 @@ class c_parameters:
     def __init__(self, variable_parameters):
 
         # Fixed Params
-        self.TP = 100  # no. periods (30)
+        self.TP = 10  # no. periods (30)
         self.t_start = 10  # delay until policy starts (11)
         self.t_period = 10  # length of regulation period
         self.t_impl = 30  # no. of implementation periods
@@ -67,21 +67,38 @@ class c_parameters:
         self.m0 = [self.m0] * self.N
         self.omg = [dOmg/(dOmg + 1), 1/(dOmg + 1)]
 
+        self.exp_mode = []
+        self.exp_x = [0] * self.N
+
         if ex_mode <= 1:
             self.ex_mode = "uniform"
         else:
             self.ex_mode = "discriminate"
 
-        if exp_mode < 1:
-            self.exp_mode = ["trend"] * self.N
-            self.exp_x = exp_x_trend[0] + \
-                (exp_x_trend[1] - exp_x_trend[0]) * (exp_mode - 1)
-        elif exp_mode < 2:
-            self.exp_mode = ["myopic"] * self.N
-            self.exp_x = 0
-        else:
-            self.exp_mode = ["adaptive"] * self.N
-            self.exp_x = exp_x_adaptive[0] + (exp_x_adaptive[1]-exp_x_adaptive[0]) * (exp_mode-2) 
+        # if exp_mode < 1:
+        #     self.exp_mode = ["trend"] * self.N
+        #     self.exp_x = exp_x_trend[0] + \
+        #         (exp_x_trend[1] - exp_x_trend[0]) * (exp_mode - 1)
+        # elif exp_mode < 2:
+        #     self.exp_mode = ["myopic"] * self.N
+        #     self.exp_x = 0
+        # else:
+        #     self.exp_mode = ["adaptive"] * self.N
+        #     self.exp_x = exp_x_adaptive[0] + (exp_x_adaptive[1]-exp_x_adaptive[0]) * (exp_mode-2) 
+
+        for j in range(self.N):
+            r = np.random.random()
+            if r < 0.33:
+                self.exp_mode.append("trend")
+                x_val = exp_x_trend[0] + (exp_x_trend[1] - exp_x_trend[0]) * np.random.random()
+            elif r < 0.66:
+                self.exp_mode.append("myopic")
+                x_val = 0  # myopic firms ignore history
+            else:
+                self.exp_mode.append("adaptive")
+                x_val = exp_x_adaptive[0] + (exp_x_adaptive[1] - exp_x_adaptive[0]) * np.random.random()
+            
+            self.exp_x[j] = x_val
 
         # Toggle model dynamics
         self.calibrate = True
@@ -214,7 +231,7 @@ class c_firm:
         # list of abatement options [[a,b],[a,b],...]
         self.lamb = copy.deepcopy(p.lamb[j])
         self.lamb0 = copy.deepcopy(p.lamb[j])  # copy of list for documentation
-        self.x = p.exp_x  # expectation factor
+        self.x = p.exp_x[j]  # expectation factor
 
         # dynamic variables
         self.s, self.sq, self.f, self.e, self.qg, self.qg_s, self.qg_d, self.qg_I, self.D, self.Dl, self.pg, self.m, self.A, self.B, self.pe, self.pe2, self.qp_d, self.u_i, self.u_t, self.cu_t, self.c_e, self.c_pr = np.zeros(
@@ -225,6 +242,7 @@ class c_firm:
         self.pg[0] = p.B0[j] * (1+p.m0[j])  # sales price
         self.A[0] = self.A[1] = p.A0[j]  # emissions intensity
         self.B[0] = self.B[1] = p.B0[j]  # production costs
+        #print(f"FIRM {self.j} : EXP MODE: {self.exp_mode}")
 
     def set_expectations(self, p, t):
 
@@ -498,8 +516,8 @@ class ClimatePolicyEnv:
         max_vals = [1.0, 1.0, 10.0, 1.0, 1.0, 25.0]
         norm_obs = [x / m for x, m in zip(raw_obs, max_vals)]
 
-        #print(f"Observations at t={t}: {obs}")
-        #print(f"Normalised at: {normalised_obs}")
+        #print(f"Observations at t={t}: {raw_obs}")
+        #print(f"Normalised at: {norm_obs}")
 
         return np.array(norm_obs, dtype=np.float32)
 
@@ -523,3 +541,10 @@ class ClimatePolicyEnv:
     
     def render(self):
         plot_emissions_over_time([self.sector, self.params])
+
+
+env = ClimatePolicyEnv() 
+
+for i in range(10) :
+    env.step(1)
+env.render()

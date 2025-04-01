@@ -11,7 +11,8 @@ Parameters::Parameters() {
     rng = std::mt19937(rd());
     
     // GENERATE RANDOM VAL IN BOUNDS
-    this->N = static_cast<int>(std::round(Parameters::random_val(0)));
+    //this->N = static_cast<int>(std::round(Parameters::random_val(0)));
+    this->N = 50;
     this->gamma = Parameters::random_val(1);
     this->delAB = Parameters::random_val(2);
     this->E_max = Parameters::random_val(3);
@@ -33,31 +34,27 @@ Parameters::Parameters() {
     this->eta = Parameters::random_val(13);
     this->delEta = Parameters::random_val(14);
 
-    double ex_mode_val = Parameters::random_val(15);
-    double exp_mode_val = Parameters::random_val(16);
+    this->exp_mode.resize(this->N);
+    this->exp_x.resize(this->N);
+    double exp_mode_val; 
 
-    // ex_mode HANDLING
-
-    if (ex_mode_val <= 1.0) {
-        this->ex_mode = "uniform";
-    } else {
-        this->ex_mode = "discriminate";
-    }
-
-    if (exp_mode_val < 1.0) {
-        this->exp_mode = std::vector<std::string>(N, "trend");
-        this->exp_x = this->exp_x_trend[0] + (this->exp_x_trend[1] - this->exp_x_trend[0]) * (exp_mode_val - 1.0);
-    } else if (exp_mode_val < 2.0) {
-        this->exp_mode = std::vector<std::string>(N, "myopic");
-        this->exp_x = 0.0;
-    } else {
-        this->exp_mode = std::vector<std::string>(N, "adaptive");
-        this->exp_x = this->exp_x_adaptive[0] + (this->exp_x_adaptive[1] - this->exp_x_adaptive[0]) * (exp_mode_val - 2.0);
+    for (int i = 0; i < this->N; ++i) {
+        exp_mode_val = Parameters::random_val(15);
+        if (exp_mode_val < 1.0) {
+            this->exp_mode[i] = "trend";
+            this->exp_x[i] = this->exp_x_trend[0] + (this->exp_x_trend[1] - this->exp_x_trend[0]) * (exp_mode_val); // - 1.0 TYPO!
+        } else if (exp_mode_val < 2.0) {
+            this->exp_mode[i] = "myopic";
+            this->exp_x[i] = 0.0;
+        } else {
+            this->exp_mode[i] = "adaptive";
+            this->exp_x[i] = this->exp_x_adaptive[0] + (this->exp_x_adaptive[1] - this->exp_x_adaptive[0]) * (exp_mode_val - 2.0);
+        }
     }
 
     Parameters::generateRandomPar();
 
-    std::cout << "INIT WITH " << this->N << " FIRMS!" << std::endl;
+    //std::cout << "INIT WITH " << this->N << " FIRMS!" << std::endl;
 }
 
 void Parameters::generateRandomPar() {

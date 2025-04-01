@@ -46,7 +46,6 @@ class Firm {
         std::vector<double> u_i;    // Investment utilization rate
         std::vector<double> u_t;    // Total capacity utilization rate
         std::vector<double> cu_t;   // Cumulative utilization rate (historical average)
-        std::vector<double> c_e;    // Total costs per emission unit
         std::vector<double> c_pr;   // Total production costs (including abatement)
 
         Firm(const Parameters& p, int firmIndex);

@@ -8,10 +8,10 @@ Firm::Firm(const Parameters& p, int firmIndex) :
     delta(p.a[firmIndex]),
     eta(p.e[firmIndex]),
     exp_mode(p.exp_mode[firmIndex]),
-    x(p.exp_x),
+    x(p.exp_x[firmIndex]),
     lamb(p.lamb[firmIndex])    {
     
-    int T_plus = p.TP + 2;
+    int T_plus = p.T + 2;
 
     // SIZE VECTORS
     this->s.resize(T_plus);
@@ -32,15 +32,13 @@ Firm::Firm(const Parameters& p, int firmIndex) :
     this->u_i.resize(T_plus);
     this->u_t.resize(T_plus);
     this->cu_t.resize(T_plus);
-    this->c_e.resize(T_plus);
     this->c_pr.resize(T_plus);
 
     this->m[0] = p.m0[firmIndex];                          // initial mark-up rate
     this->pg[0] = p.B0 * (1.0 + p.m0[firmIndex]);          // initial sales price
     this->A[0] = this->A[1] = p.b[firmIndex];              // initial emissions intensity
     this->B[0] = this->B[1] = p.c[firmIndex];              // initial production costs
-
-    std::cout << "FIRM " << this->j << " INIT!" << std::endl;
+    // std::cout << "INIT " << this->j << " | EXP MODE " << this->exp_mode << " | EXP FACTOR " << this->x << std::endl;
 }
 
 void Firm::setExpectations(const int t) {
@@ -68,7 +66,6 @@ void Firm::setExpectations(const int t) {
     } else {
         this->m[t] = this->m[t - 1];
     }
-    std::cout << "EXPECTATION SET FIRM " << this->j << std::endl;
 }
 
 double Firm::production(const int t, const double pe) {

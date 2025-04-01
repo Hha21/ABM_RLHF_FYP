@@ -11,11 +11,11 @@ class Sector {
 
     private:
 
-        const Parameters& params;
+        Parameters* params;
 
     public:
 
-        Sector(const Parameters& p);
+        Sector(Parameters& p);
 
         void applyExpectations(const int t);
         void applyAbatement(const int t, const double pe);

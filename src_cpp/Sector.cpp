@@ -1,19 +1,21 @@
-#include "Sector.h"
+#include "../include_cpp/Sector.h"
 
-Sector::Sector(const Parameters& p) : params(p) {
+Sector::Sector(Parameters& p) {
+
+    this->params = &p;
 
     // INIT FIRMS
-    for (int j = 0; j < this->params.N; ++j) {
-        this->firms.emplace_back(this->params, j);
+    for (int j = 0; j < this->params->N; ++j) {
+        this->firms.emplace_back(*this->params, j);
     }
 
-    const int T_plus = this->params.T + 2;
+    const int T_plus = this->params->T + 2;
     this->D.resize(T_plus, 0.0);
     this->E.resize(T_plus, 0.0);
     this->Q.resize(T_plus, 0.0);
     this->u_t.resize(T_plus, 0.0);
 
-    const double initial_share =  1.0 / (this->params.N);
+    const double initial_share =  1.0 / (this->params->N);
     double price_weighted_sum = 0.0;
 
     for (Firm& firm : this->firms) {
@@ -21,7 +23,7 @@ Sector::Sector(const Parameters& p) : params(p) {
         price_weighted_sum += initial_share * firm.pg[0];
     }
 
-    this->D[0] = this->params.D0 * std::exp(-price_weighted_sum * this->params.gamma);
+    this->D[0] = this->params->D0 * std::exp(-price_weighted_sum * this->params->gamma);
 
     //ALLOCATE INITIAL DEMAND
     for (Firm& firm : this->firms) {
@@ -53,7 +55,7 @@ void Sector::applyProduction(const int t, const double pe) {
     }
 
     for (Firm& firm : this->firms) {
-        firm.sq[t] = (this->Q[t] > 0.0) ? (firm.qg[t] / this->Q[t]) : (1.0 / params.N);
+        firm.sq[t] = (this->Q[t] > 0.0) ? (firm.qg[t] / this->Q[t]) : (1.0 / params->N);
     }
 
     this->tax_income = tax_revenue;
@@ -64,7 +66,7 @@ void Sector::tradeCommodities(const int t) {
     // Step 1 : Calculate Fitness for each Firm, and calculate Mean Fitness
     double f_mean = 0.0;
     for (Firm& firm : this->firms) {
-        double fitness_j = - this->params.omg[0] * firm.pg[t] - this->params.omg[1] * firm.Dl[t - 1];
+        double fitness_j = - this->params->omg[0] * firm.pg[t] - this->params->omg[1] * firm.Dl[t - 1];
         firm.f[t] = fitness_j;
         f_mean += fitness_j * firm.s[t - 1];
     }
@@ -72,13 +74,13 @@ void Sector::tradeCommodities(const int t) {
     // Step 2 : Update Market Shares based on fitness and mean fitness, and find Mean Price
     double p_mean = 0.0;
     for (Firm& firm : this->firms) {
-        marketshare_j = std::max(0.0, firm.s[t - 1] * (1.0 - this->params.chi * (firm.f[t] - f_mean) / f_mean));
+        double marketshare_j = std::max(0.0, firm.s[t - 1] * (1.0 - this->params->chi * (firm.f[t] - f_mean) / f_mean));
         firm.s[t] =  marketshare_j;
         p_mean += marketshare_j * firm.pg[t];
     }
 
     // Step 3 : Calculate Total Demand
-    this->D[t] = this->params.D0 * std::exp(-p_mean * this->params.gamma);
+    this->D[t] = this->params->D0 * std::exp(-p_mean * this->params->gamma);
 
     // Step 4 : Allocate Demand and Update Inventories
     for (Firm& firm : this->firms) {
@@ -95,7 +97,7 @@ void Sector::tradeCommodities(const int t) {
     }
     double err = 1.0 - share_sum;
     if (std::abs(err) > 1e-10) {
-        std::cout << "MARKET SHARE SUM: " << share_sum << " ERROR!" << std::endl;
+        //std::cout << "MARKET SHARE SUM: " << share_sum << " ERROR!" << std::endl;
         double correction_factor = 1.0 / (1.0 - err);
         for (Firm& firm : this->firms) {
             firm.s[t] *= correction_factor;
