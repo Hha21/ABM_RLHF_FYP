@@ -6,6 +6,7 @@ std::tuple<std::vector<double>, double, bool> Environment::step(const double act
 
     double new_action;
 
+    // ENSURE WITHIN LIMITS
     if (this->last_action + action > this->tax_limit) {
         new_action = this->tax_limit;
     } else if (this->last_action + action < 0.0) {
@@ -16,6 +17,7 @@ std::tuple<std::vector<double>, double, bool> Environment::step(const double act
 
     int period = this->params.t_period;
 
+    // DYNAMICS WITHIN PERIOD
     for (int i = 0; i < period && this->t <= this->params.T; ++i, ++this->t) {
         this->tax_actions.push_back(new_action);
         this->sector.applyExpectations(t);
@@ -24,15 +26,20 @@ std::tuple<std::vector<double>, double, bool> Environment::step(const double act
         this->sector.tradeCommodities(t);
     }
 
+    // GET OBSERVATIONS
     std::vector<double> next_obs = Environment::observe();
+
+    // GET REWARD
     double reward = Environment::calculateReward(next_obs, new_action, last_action);
     last_action = new_action;
     
     done = (t > this->params.T);
+
     // if (done) {
     //     Environment::outputTxt();
     // }
 
+    // RETURN MDP
     this->Markov = {next_obs, reward, done};
     return this->Markov;
 }
@@ -100,7 +107,7 @@ std::vector<double> Environment::reset() {
 }
 
 Environment::Environment() : params(), sector(params) {
-
+    std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
     std::vector<double> init_obs = Environment::reset();   
 }
 

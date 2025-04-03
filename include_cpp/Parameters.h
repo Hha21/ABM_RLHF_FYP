@@ -35,7 +35,7 @@ class Parameters {
 
     public:
     
-        int TP = 30;            // Num Periods
+        int NP = 30;            // Num Periods
         int t_start = 1;       
         int t_period = 10;      //Length of one regulation period
         int t_impl = 10;        //Num. implementation periods
@@ -47,7 +47,7 @@ class Parameters {
         int lamb_n = 20;
         double I_d = 0.1;
 
-        int T = this->TP * this->t_period;
+        int T = this->NP * this->t_period;
 
         int N;
 

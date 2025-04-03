@@ -5,7 +5,31 @@ __pycache__/
 env
 
 # .TXT 
-*.txt
+parameters_list.txt
+test_results.txt
+EmissionsVsTaxData.txt
 
 # OBJ FILES
 *.o
+
+# CMake build artifacts
+/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled objects and binaries
+*.o
+*.so
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs and editor clutter
+*.log
+*.swp
+*.DS_Store

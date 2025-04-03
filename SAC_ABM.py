@@ -3,12 +3,38 @@ import torch.nn as nn
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import sys
 from copy import deepcopy
 from torch.distributions import Normal  
 
-from ABM_env import ClimatePolicyEnv
+sys.path.insert(1, "./build")
 
-env = ClimatePolicyEnv() 
+#from ABM_env import ClimatePolicyEnv
+
+import cpp_env
+print(dir(cpp_env))
+
+env = cpp_env.Environment()
+cumulative_reward = 0
+emissions_total = 0
+
+for i in range(10):
+    done = False
+    while (not done):
+        [obs, reward, done] = env.step(0.1)
+        cumulative_reward += reward
+        emissions_total += obs[2]
+    
+    if (i == 9):
+        print("WRITE DATA")
+        env.outputTxt()
+
+    print(f"Cumulative Reward is : {cumulative_reward}")
+    print(f"TOTAL EMISSIONS : {emissions_total}")
+    cumulative_reward = 0
+    emissions_total = 0
+    env.reset()
+
 
 def set_seed(env, seed):
     np.random.seed(seed)
@@ -189,11 +215,8 @@ def rollout_deterministic(env, agent, rollout_len=200, render=True):
     if render:
         env.render()
 
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.shape[0]
+# agent = SAC(state_dim, action_dim, alpha = 0.4, batch_size = 128, gamma = 0.95, pi_lr=1e-4, q_lr=2e-4)
+# train(env, agent, episode_n=1000) 
 
-agent = SAC(state_dim, action_dim, alpha = 0.4, batch_size = 128, gamma = 0.95, pi_lr=1e-4, q_lr=2e-4)
-train(env, agent, episode_n=1000) 
-
-rollout_deterministic(env, agent)
-env.render()
+# rollout_deterministic(env, agent)
+# env.render()

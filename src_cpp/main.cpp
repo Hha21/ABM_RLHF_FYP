@@ -11,16 +11,10 @@ bool emissionsZeroes(const std::vector<double>& emissions, double threshold = 0.
     return false;
 }
 
-int main() {
-
+void runEmissionsTests() {
     std::ofstream logfile("test_results.txt");
 
     Environment env = Environment();
-
-    int t0 = env.params.t_start;
-    int t_max = env.params.T;
-    double action = 0.3;
-    MDP Markov;
     
     const std::vector<double> actions = {0.05, 0.10, 0.15, 0.20, 0.25, 0.30};
     const int num_trials = 2000;
@@ -38,7 +32,7 @@ int main() {
             
             std::vector<double> emissions_log;
 
-            while (!env.done) {
+            while (!env.getDone()) {
                 auto [obs, reward, done] = env.step(action);
                 //std::cout << "EMISSIONS: " << obs[0] << std::endl;
                 emissions_log.push_back(obs[0]); 
@@ -59,5 +53,15 @@ int main() {
 
     logfile.close();
     std::cout << "All trials complete.\n";
+}
+
+int main() {
+    
+    Environment env = Environment();
+
+    while (!env.getDone()) {
+        env.step(0.0);
+    }
+
     return 0;
 }
