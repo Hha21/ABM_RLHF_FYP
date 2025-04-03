@@ -536,9 +536,8 @@ class ClimatePolicyEnv:
 
 env = ClimatePolicyEnv() 
 
-runtest = 100
 
-for i in range(runtest):
-    while (not env.done) :
-        env.step(0.1)
-    env.reset()
+while (not env.done) :
+    env.step(0.1)
+
+env.render()
