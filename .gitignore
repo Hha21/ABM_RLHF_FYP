@@ -1,4 +1,11 @@
 __pycache__/
 
+# EXECUTABLES
 *.out
+env
+
+# .TXT 
 *.txt
+
+# OBJ FILES
+*.o
