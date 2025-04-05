@@ -28,7 +28,12 @@ class Environment {
         double tax_limit = 3.0;
         double last_action = 0.0;
 
-        std::vector<double> tax_actions;
+        double init_emissions = 0.0;                                                ///< For Reward Signal Calibration
+        double init_CC0 = 0.0;
+
+        std::vector<double> tax_actions;                                            ///< All Actions Taken
+        std::vector<double> CC0;                                                    ///< Mean Price of Goods
+        std::vector<double> CC;                                                     ///< Consumer Impact (Assume Tax Revenue Recycled)
 
         const std::array<double, 6> max_vals = {1.0, 1.0, 10.0, 1.0, 1.0, 25.0};
 

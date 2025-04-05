@@ -23,12 +23,12 @@ class Sector {
         void tradeCommodities(const int t);
 
         std::vector<Firm> firms;
-        std::vector<double> D;
-        std::vector<double> E;
-        std::vector<double> Q;
+        std::vector<double> D;                              ///< Sector Level Demand
+        std::vector<double> E;                              ///< Sector Emissions
+        std::vector<double> Q;                              ///< Sector Quantity of Goods Produced
+        std::vector<double> Q_s;                            ///< Sector Quantity of Goods Sold
         std::vector<double> u_t;
-
-        double tax_income;
+        std::vector<double> R;                              ///< Sector Tax Revenue
 };
 
 

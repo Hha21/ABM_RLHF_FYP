@@ -14,3 +14,4 @@ pybind11_add_module(cpp_env
 
 target_include_directories(cpp_env PRIVATE include_cpp)
 target_compile_features(cpp_env PRIVATE cxx_std_17)
+target_compile_options(cpp_env PRIVATE -O3 -march=native)

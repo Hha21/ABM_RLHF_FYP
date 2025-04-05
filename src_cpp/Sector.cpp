@@ -13,7 +13,9 @@ Sector::Sector(Parameters& p) {
     this->D.resize(T_plus, 0.0);
     this->E.resize(T_plus, 0.0);
     this->Q.resize(T_plus, 0.0);
+    this->Q_s.resize(T_plus, 0.0);
     this->u_t.resize(T_plus, 0.0);
+    this->R.resize(T_plus, 0.0);
 
     const double initial_share =  1.0 / (this->params->N);
     double price_weighted_sum = 0.0;
@@ -58,10 +60,11 @@ void Sector::applyProduction(const int t, const double pe) {
         firm.sq[t] = (this->Q[t] > 0.0) ? (firm.qg[t] / this->Q[t]) : (1.0 / params->N);
     }
 
-    this->tax_income = tax_revenue;
+    this->R[t] = tax_revenue;
 }
 
 void Sector::tradeCommodities(const int t) {
+    this->Q_s[t] = 0.0;
 
     // Step 1 : Calculate Fitness for each Firm, and calculate Mean Fitness
     double f_mean = 0.0;
@@ -88,6 +91,7 @@ void Sector::tradeCommodities(const int t) {
         firm.qg_s[t] = std::min(firm.D[t], firm.qg_I[t]);
         firm.qg_I[t] -= firm.qg_s[t];
         firm.Dl[t] = firm.D[t] - firm.qg_s[t];              // Unfilled Demand
+        this->Q_s[t] += firm.qg_s[t];
     }
 
     // Ensure Market Shares sum to 1:

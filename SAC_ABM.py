@@ -18,22 +18,14 @@ env = cpp_env.Environment()
 cumulative_reward = 0
 emissions_total = 0
 
-for i in range(10):
-    done = False
-    while (not done):
-        [obs, reward, done] = env.step(0.1)
-        cumulative_reward += reward
-        emissions_total += obs[2]
-    
-    if (i == 9):
-        print("WRITE DATA")
-        env.outputTxt()
+done = False
 
-    print(f"Cumulative Reward is : {cumulative_reward}")
-    print(f"TOTAL EMISSIONS : {emissions_total}")
-    cumulative_reward = 0
-    emissions_total = 0
-    env.reset()
+while (not done):
+    [obs, reward, done] = env.step(0.1)
+    print(f"MEAN EMISSIONS: {obs[0]} , PRICE OF GOODS: {obs[1]}, t = {env.getTime()}")
+
+env.outputTxt()
+
 
 
 def set_seed(env, seed):
