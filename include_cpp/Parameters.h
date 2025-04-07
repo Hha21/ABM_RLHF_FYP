@@ -35,10 +35,10 @@ class Parameters {
 
     public:
     
-        int NP = 30;            // Num Periods
+        int NP = 31;            // Num Periods
         int t_start = 1;       
         int t_period = 10;      //Length of one regulation period
-        int t_impl = 11;        //Num. implementation periods
+        int t_impl = 10;        //Num. implementation periods
 
         double D0 = 1.0;
         double A0 = 1.0;

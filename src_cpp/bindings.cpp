@@ -11,11 +11,11 @@ PYBIND11_MODULE(cpp_env, m) {
     m.doc() = "C++ ABM Environment Module";
 
     py::class_<Environment>(m, "Environment")
-        .def(py::init<>())
+        .def(py::init<double>(), py::arg("target") = 0.2)
         .def("reset", &Environment::reset)
         .def("step", &Environment::step)
-        .def("action_space", &Environment::getActionSpace)
-        .def("observation_space", &Environment::getObservationSpace)
+        // .def("action_space", &Environment::getActionSpace)
+        // .def("observation_space", &Environment::getObservationSpace)
         .def("isDone", &Environment::getDone)
         .def("getTime", &Environment::getTime)
         .def("outputTxt", &Environment::outputTxt);

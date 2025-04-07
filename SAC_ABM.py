@@ -21,8 +21,8 @@ emissions_total = 0
 done = False
 
 while (not done):
-    [obs, reward, done] = env.step(0.1)
-    print(f"MEAN EMISSIONS: {obs[0]} , PRICE OF GOODS: {obs[1]}, t = {env.getTime()}")
+    [obs, reward_emissions, reward_agree, done] = env.step(7)
+    print(f"R_E, R_A = [{reward_emissions}, {reward_agree}]")
 
 env.outputTxt()
 

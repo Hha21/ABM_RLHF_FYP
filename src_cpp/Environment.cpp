@@ -40,32 +40,31 @@ static inline double interpolate_model_1_1(double rel_C02_reduction, double rel_
     return C02_SCORE + PRICE_SCORE;
 }
 
-std::tuple<std::vector<double>, double, bool> Environment::step(const double action) {
-
-    // double new_action = std::clamp(this->last_action + action, 0.0, this->tax_limit);
-
-    double new_action;
-
+std::tuple<std::vector<double>, double, double, bool> Environment::step(const int action_idx) {
+    
     // ENSURE WITHIN LIMITS
+    assert(action_idx >= 0 && action_idx < 10);
+    double action = this->action_table[action_idx];
+
     if (this->last_action + action > this->tax_limit) {
-        new_action = this->tax_limit;
+        this->new_action = this->tax_limit;
     } else if (this->last_action + action < 0.0) {
-        new_action = 0.0;
+        this->new_action = 0.0;
     } else {
-        new_action = this->last_action + action;
+        this->new_action = this->last_action + action;
     }
 
     int period = this->params.t_period;
 
     // FOR ONE REGULATION PERIOD
     for (int i = 0; i < period && this->t <= this->params.T; ++i, ++this->t) {
-        this->tax_actions.push_back(new_action);
+        this->tax_actions[this->t] = this->new_action;
 
         // MAIN DYNAMICS
-        this->sector.applyExpectations(t);
-        this->sector.applyAbatement(t, new_action);
-        this->sector.applyProduction(t, new_action);
-        this->sector.tradeCommodities(t);
+        this->sector.applyExpectations(this->t);
+        this->sector.applyAbatement(this->t, this->new_action);
+        this->sector.applyProduction(this->t, this->new_action);
+        this->sector.tradeCommodities(this->t);
 
         // MEASURES
         double price_goods = 0.0;
@@ -73,13 +72,13 @@ std::tuple<std::vector<double>, double, bool> Environment::step(const double act
                 price_goods += firm.s[this->t] * firm.pg[this->t];
         }
 
-        this->CC0.push_back(price_goods);
+        this->CC0[this->t] = price_goods;
 
-        double total_sold = this->sector.Q_s[t];
-        double total_revenue = this->sector.R[t];
+        double total_sold = this->sector.Q_s[this->t];
+        double total_revenue = this->sector.R[this->t];
 
         double consumer_impact = price_goods - (total_sold > 0.0 ? total_revenue / total_sold : 0.0);
-        this->CC.push_back(consumer_impact);
+        this->CC[this->t] = consumer_impact;
 
         // FOR INITIALISING VALUES
         if (this->t <= 10) {
@@ -88,10 +87,8 @@ std::tuple<std::vector<double>, double, bool> Environment::step(const double act
         }
         // MEAN
         if (this->t == 10) {
-            std::cout << "MODEL CALIBRATION t=" << this->t << std::endl;
             this->init_emissions /= this->params.t_period;
             this->init_CC0 /= this->params.t_period;
-            std::cout << "INIT EMISSIONS, CC0 = [" << this->init_emissions << " ," << this->init_CC0 << "] " << std::endl;
         }
     }
 
@@ -99,109 +96,88 @@ std::tuple<std::vector<double>, double, bool> Environment::step(const double act
     // GET OBSERVATIONS
     std::vector<double> next_obs = Environment::observe();
 
-    // GET REWARD
-    double reward = Environment::calculateReward(next_obs, new_action, last_action);
-    last_action = new_action;
-    
-    done = (t > this->params.T);
+    // GET REWARD(s)
+    std::array<double, 2> reward = Environment::calculateReward(next_obs);
 
-    // if (done) {
-    //     Environment::outputTxt();
-    // }
+    this->last_action = this->new_action;
+    done = (this->t > this->params.T);
 
     // RETURN MDP
-    this->Markov = {next_obs, reward, done};
+    this->Markov = {next_obs, reward[0], reward[1], done};
     return this->Markov;
 }
 
 std::vector<double> Environment::observe() {
-    // int period = this->params.t_period;
-    // int start = this->t - period;
+    
+    // DEFINE OBSERVATIONS:
+    // FOR EACH FIRM : {MARKET SHARE, EMISSIONS INTENSITY, COST OF PRODUCTION, NO. REMAINING ABATEMENT OPTIONS}
+    // FOR WHOLE SECTOR : {CURRENT EMISSIONS, LAST TAX LEVEL, CURRENT CONSUMER IMPACT}
 
-    // double LE = this->sector.E[this->t - 1];
-    // double LT = this->last_action;
+    static const double invNumOptions = 1.0 / (static_cast<double>(this->params.lamb_n));
 
-    // // TOTAL EMISSIONS IN PERIOD
-    // double E_period = 0.0;
+    std::vector<double> current_obs(this->observation_dim);
+    const int t_curr = this->t - 1;
 
-    // // HHI MARKET CONCENTRATION
-    // double HHI = 0.0;
-
-    // // Avg. PROFIT RATE (PL), Avg. SALES PRICE (CC0)
-    // double numerator_PL = 0.0, denominator_PL = 0.0, CC0 = 0.0;
-
-    // for (int i = start; i < this->t; ++i) {
-    //     E_period += this->sector.E[i];
-    //     for (const Firm& firm : this->sector.firms) {
-    //         HHI += firm.s[i] * firm.s[i];
-    //         double unit_cost = this->last_action * firm.A[i] + firm.B[i];
-    //         numerator_PL += firm.qg_s[i] * (firm.pg[i] - unit_cost);
-    //         denominator_PL += firm.qg[i] * unit_cost;
-    //         CC0 += firm.s[i] * firm.pg[i];
-    //     }
-    // }
-    // double PL = (denominator_PL > 0) ? numerator_PL / denominator_PL : 0.0;
-
-    // std::vector<double> obs = {LE, LT, E_period, HHI, PL, CC0};
-
-    // for (int i = 0; i < 6; ++i) {
-    //     obs[i] /= this->max_vals[i];
-    // }
-
-    int period = this->params.t_period;
-    int start = this->t - period;
-
-    double E_period = 0.0;
-    double price_goods = 0.0;
-    double goods_sold = 0.0;
-    double tax_revenue = 0.0;
-
-    for (int i = start; i < this->t; ++i) {
-        E_period += this->sector.E[i];
-        goods_sold += this->sector.Q_s[i];
-        tax_revenue += this->sector.R[i];
-
-        for (const Firm& firm : this->sector.firms) {
-            price_goods += firm.s[i] * firm.pg[i];
-        }
+    // GET FIRM OBS
+    for (int i = 0; i < this->params.N; ++i) {
+        const Firm& firm = this->sector.firms[i];
+        int baseIdx = i * 4;
+        current_obs[baseIdx + 0] = firm.s[t_curr];
+        current_obs[baseIdx + 1] = firm.A[t_curr];
+        current_obs[baseIdx + 2] = firm.B[t_curr];
+        current_obs[baseIdx + 3] = firm.lamb.size() * invNumOptions;
     }
 
-    E_period /= period;
-    goods_sold /= period;
-    tax_revenue /= period;
-    price_goods /= period;
+    double E_recent = this->sector.E[t_curr];
+    double CC_recent = this->CC[t_curr];
 
-    double consumer_impact = price_goods - (goods_sold > 0.0 ? tax_revenue / goods_sold : 0.0);
-    std::vector<double> obs = {E_period, consumer_impact};
+    int endIdx = this->params.N * 4;
     
-    return obs;
+    current_obs[endIdx + 0] = E_recent;
+    current_obs[endIdx + 1] = this->new_action;
+    current_obs[endIdx + 2] = CC_recent;
+    
+    // std::cout << "OBS VECTOR (t = " << t_curr << "): ";
+    // for (int i = 0; i < this->observation_dim; ++i) {
+    //     std::cout << current_obs[i] << std::endl;
+    // }
+
+    return current_obs;
 }
 
-double Environment::calculateReward(const std::vector<double>& obs, const double action, const double last_action) {
-    // double emissions = obs[2];
-    // double target = 0.2;
-    // double deviation = emissions - target;
+std::array<double, 2> Environment::calculateReward(const std::vector<double>& obs) {
 
-    // double emissions_reward = std::exp(10 * std::abs(deviation)) + 1;
-    // double smoothness_penalty = -0.2 * (action - last_action) * (action - last_action);
-
-    // return emissions_reward + smoothness_penalty;
-
+    // INIT EMISSIONS, CONSUMER IMPACT, TARGET FOR EMISSIONS REDUCTION, 1.0 / (INIT - TARGET)
     static const double E0 = this->init_emissions;
     static const double CC0_0 = this->init_CC0;
+    static const double E_TARGET = E0 * this->emissions_target;
+    static const double inv_denominator = 1.0 / (E0 - E_TARGET);
 
-    double emissions_decrease = (E0 - obs[0]) / (E0);
-    double price_increase = (obs[1] / CC0_0) - 1.0;
-    std::cout << "EMISSIONS PERIOD, CC = " << obs[0] << ", " << obs[1] << std::endl;
-    std::cout << "EMISSIONS DEC, PRICE INC = " << emissions_decrease << ", " << price_increase << std::endl;
+    const int endIdx = obs.size() - 1;
 
+    double consumer_impact = obs[endIdx];
+    double emissions_current = obs[endIdx - 2];
+
+    double emissions_decrease = (E0 - emissions_current) / (E0);
+    double price_increase = (consumer_impact / CC0_0) - 1.0;
+
+    // AGREEABLENESS REWARD
     double agreeableness_util = interpolate_model_1_1(emissions_decrease, price_increase);
-    std::cout << "AGREEABLENESS RAW: "<< agreeableness_util << std::endl;
-    double agreeableness = 1.0 / (1.0 + std::exp(-agreeableness_util));
-    std::cout << "AGREEABLENESS [0,1]: "<< agreeableness << std::endl;
-    std::cout << "\n" << std::endl;
+    double agreeableness_reward = 1.0 / (1.0 + std::exp(-agreeableness_util));
+    
+    // EMISSIONS REWARD, INIT LINEAR
+    double emissions_reward;
+    if (emissions_current <= E_TARGET) {
+        emissions_reward = 1.0;
+    } else if (emissions_current < E0 && emissions_current > E_TARGET) {
+        emissions_reward = (E0 - emissions_current) * inv_denominator;
+    } else {
+        emissions_reward = 0.0;
+    }
 
-    return agreeableness;
+    std::array<double, 2> reward = {emissions_reward, agreeableness_reward};
+
+    return reward;
 }
 
 std::vector<double> Environment::reset() {
@@ -211,16 +187,32 @@ std::vector<double> Environment::reset() {
     this->t = this->params.t_start;
     this->done = false;
     this->last_action = 0.0;
+    this->new_action = 0.0;
+    this->init_emissions = 0.0;
+    this->init_CC0 = 0.0;
 
-    auto MDP_init = Environment::step(0.0);
+    const int T_plus = this->params.T + 2;
+
+    this->tax_actions.clear();
+    this->CC0.clear();
+    this->CC.clear();
+
+    this->tax_actions.resize(T_plus, 0.0);
+    this->CC0.resize(T_plus, 0.0);
+    this->CC.resize(T_plus, 0.0);
+
+    auto MDP_init = Environment::step(4);                   //CALIBRATE WITH NO PRICE OF EMISSIONS
     std::vector<double> obs_init = Environment::observe();
 
     return obs_init;
 }
 
-Environment::Environment() : params(), sector(params) {
+Environment::Environment(double target_) : 
+                            params(), sector(params), emissions_target(target_) {
+
     std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
     std::vector<double> init_obs = Environment::reset();   
+
 }
 
 void Environment::outputTxt() {
