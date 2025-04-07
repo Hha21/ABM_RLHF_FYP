@@ -9,6 +9,8 @@ parameters_list.txt
 test_results.txt
 EmissionsVsTaxData.txt
 
+util_plots.py
+
 # OBJ FILES
 *.o
 
