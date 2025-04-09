@@ -41,8 +41,8 @@ Firm::Firm(const Parameters& p, int firmIndex) :
     // std::cout << "INIT " << this->j << " | EXP MODE " << this->exp_mode << " | EXP FACTOR " << this->x << std::endl;
 }
 
+// Set desired production level based on expectation mode.
 void Firm::setExpectations(const int t) {
-    // Set desired output based on expectation mode
 
     if (this->exp_mode == "trend") {
         if (t > 1) {
@@ -70,6 +70,7 @@ void Firm::setExpectations(const int t) {
 
 }
 
+// Produce goods and emissions based on expectations (of demand).
 double Firm::production(const int t, const double pe) {
     // Step 1: Produce as planned
     this->qg[t] = this->qg_d[t];
@@ -89,6 +90,7 @@ double Firm::production(const int t, const double pe) {
     return this->e[t] * pe;
 }
 
+// Contains logic for whether to adopt an abating technology.
 void Firm::abatement(const int t, const double pe) {
 
     double o = 0.0;

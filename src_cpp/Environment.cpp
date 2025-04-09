@@ -6,37 +6,44 @@
 
 static inline double interpolate_model_1_1(double rel_C02_reduction, double rel_price_increase) {
     // LINEAR INTERPOLATION
-
-    //C02 reduction interpolation
+    // C02 UTILITY (BASED ON REDUCTIONS 0%, 50%, 100%, 200%)
     double C02_SCORE;
-    if (rel_C02_reduction <= 0.5) {                                                 //0->0.5
-        C02_SCORE = 0.41 * (rel_C02_reduction / 0.5);                           
-    } else if (rel_C02_reduction <= 1.0) {                                          //0.5->1.0
-        C02_SCORE = 0.41 + (0.56 - 0.41) * ((rel_C02_reduction - 0.5) / 0.5);
-    } else if (rel_C02_reduction <= 2.0) {                                          //1.0->2.0
+
+    // CASE 1: 0->0.5, beta = 0.41
+    if (rel_C02_reduction <= 0.5) {
+        C02_SCORE = (0.41 * 2.0) * rel_C02_reduction;                               // (0.41/0.5)                           
+    } 
+    // CASE 2 : 0.5->1.0, beta = 0.56
+    else if (rel_C02_reduction <= 1.0) {                                         
+        C02_SCORE = 0.41 + (0.56 - 0.41) * ((rel_C02_reduction - 0.5) * 2.0);      // (rel_C02_reduction - 0.5) / 0.5
+    } 
+    // CASE 3 : 1.0->2.0, beta = 0.60
+    else if (rel_C02_reduction <= 2.0) {
         C02_SCORE = 0.56 + (0.60 - 0.56) * ((rel_C02_reduction - 1.0)); // (/1.0)
-    } else {
-        if (rel_C02_reduction > 0.0) {
-            C02_SCORE = 0.60;
-        } else {
-            C02_SCORE = 0.0;
-        }
+    } 
+    // IF BEYOND SET TO REMAIN AT 0.60
+    else {
+        C02_SCORE = 0.60;
     }
 
-    //Price increase interpolation
+    // PRICE UTILITY (BASED ON 60%, 80%, 120%)
     double PRICE_SCORE;
-    if (rel_price_increase <= 0.6) {                                                //0->0.6
-        PRICE_SCORE = 1.09 * (rel_price_increase / 0.6);
-    } else if (rel_price_increase <= 0.8) {                                         //0.6->0.8
-        PRICE_SCORE = 1.09 + (0.58 - 1.09) * ((rel_price_increase - 0.6) / 0.2);
-    } else {
-        if (rel_price_increase > 0.0) {
-            PRICE_SCORE = -0.88;
-        } else {
-            PRICE_SCORE = 0.0;
-        }
+
+    // CASE 1: 0->0.6, beta = 1.09
+    if (rel_price_increase <= 0.6) {
+        PRICE_SCORE = (1.09 / 0.6) * rel_price_increase;
+    } 
+    // CASE 2: 0.6->0.8, beta = 0.58
+    else if (rel_price_increase <= 0.8) {                                        
+        PRICE_SCORE = 1.09 + (0.58 - 1.09) * ((rel_price_increase - 0.6) * 5.0); // ( / 0.2)
+    } 
+    // IF BEYOND, LINEARLY EXTEND
+    else {
+        static const double slope = (-0.88 - 0.58) * 2.5; //(.../0.4) = -3.65
+        PRICE_SCORE = -0.88 * slope * (rel_price_increase - 1.2);
     }
 
+    // RETURN UTILITY V
     return C02_SCORE + PRICE_SCORE;
 }
 
@@ -150,11 +157,14 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     // INIT EMISSIONS, CONSUMER IMPACT, TARGET FOR EMISSIONS REDUCTION, 1.0 / (INIT - TARGET)
     static const double E0 = this->init_emissions;
     static const double CC0_0 = this->init_CC0;
-    static const double E_TARGET = E0 * this->emissions_target;
-    static const double inv_denominator = 1.0 / (E0 - E_TARGET);
+    static const double alpha = 5.0;
+
+    // static const double E_TARGET = E0 * this->emissions_target;
+    // static const double inv_denominator = 1.0 / (E0 - E_TARGET);
+
+    static const double TARGET_RATIO = 1.0 - this->emissions_target;
 
     const int endIdx = obs.size() - 1;
-
     double consumer_impact = obs[endIdx];
     double emissions_current = obs[endIdx - 2];
 
@@ -165,15 +175,9 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     double agreeableness_util = interpolate_model_1_1(emissions_decrease, price_increase);
     double agreeableness_reward = 1.0 / (1.0 + std::exp(-agreeableness_util));
     
-    // EMISSIONS REWARD, INIT LINEAR
-    double emissions_reward;
-    if (emissions_current <= E_TARGET) {
-        emissions_reward = 1.0;
-    } else if (emissions_current < E0 && emissions_current > E_TARGET) {
-        emissions_reward = (E0 - emissions_current) * inv_denominator;
-    } else {
-        emissions_reward = 0.0;
-    }
+    // EMISSIONS REWARD
+    const double exponent = -alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO);
+    double emissions_reward = std::exp(exponent);
 
     std::array<double, 2> reward = {emissions_reward, agreeableness_reward};
 

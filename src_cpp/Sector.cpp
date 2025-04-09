@@ -32,18 +32,21 @@ Sector::Sector(Parameters& p) {
     }
 }
 
+// Set expectations of demand for each firm.
 void Sector::applyExpectations(const int t) {
     for (Firm& firm : this->firms) {
         firm.setExpectations(t);
     }
 }
 
+// Call firms to apply abatement logic.
 void Sector::applyAbatement(const int t, const double pe) {
     for (Firm& firm : this->firms) {
         firm.abatement(t, pe);
     }
 }
 
+// Call firms to produce goods based on their expectations.
 void Sector::applyProduction(const int t, const double pe) {
     this->E[t] = 0.0;
     this->Q[t] = 0.0;
@@ -62,6 +65,7 @@ void Sector::applyProduction(const int t, const double pe) {
     this->R[t] = tax_revenue;
 }
 
+// Trade produced goods on a shared-based market.
 void Sector::tradeCommodities(const int t) {
     this->Q_s[t] = 0.0;
 
