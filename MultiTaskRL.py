@@ -5,6 +5,7 @@ import random
 from collections import deque
 import sys
 import matplotlib.pyplot as plt
+
 # GET .so ENV
 sys.path.insert(1, "./build")
 import cpp_env
@@ -183,25 +184,28 @@ def train(env, agent, episodes):
         total_MSE_losses_a.append(agent.loss_a_rec)
 
 # DEPLOY AGENT 
-def deploy_agent(env, agent, chi = 0.5, temperature = 1.0):
-    state = env.reset()
+def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
+    newenv = cpp_env.Environment(target = 0.2, chi = chi_)
+    state = newenv.reset()
+
     done = False
 
     while (not done):
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
         emissions_q, agree_q = agent.net(state_tensor)
 
-        combined_q = (1 - chi) * emissions_q + chi * agree_q
+        combined_q = (1 - chi_) * emissions_q + chi_ * agree_q
 
         action_probs = torch.softmax(combined_q / temperature, dim = 1)
         action = torch.multinomial(action_probs, num_samples=1).item()
         
-        state, _, _, done = env.step(action)
+        state, _, _, done = newenv.step(action)
 
-    env.outputTxt()
+    newenv.outputTxt()
 
 agent = MultiTaskAgent(state_dim, action_dim, 0.99999)
 episodes = 3000
 train(env, agent, episodes) 
 
-deploy_agent(env, agent, chi = 0.05, temperature = 0.1)
+deploy_agent(agent, chi_ = 0.1, temperature = 0.1)
+deploy_agent(agent, chi_ = 0.7, temperature = 0.1)

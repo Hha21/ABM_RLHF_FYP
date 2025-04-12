@@ -26,6 +26,8 @@ class Environment {
         bool done;                                                                  ///< Termination Criteria
         MDP Markov;                                                                 ///< Current MDP
 
+        const double chi;
+
         const double tax_limit = 3.0;
         double last_action = 0.0;
         double new_action = 0.0;
@@ -63,7 +65,7 @@ class Environment {
 
     public: 
 
-        Environment(double target_ = 0.2);
+        Environment(double target_ = 0.2, double chi_ = 0.5);
 
         MDP step(const int action_idx);
 

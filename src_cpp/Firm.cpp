@@ -84,7 +84,7 @@ double Firm::production(const int t, const double pe) {
     this->qg_I[t] = this->qg_I[t - 1] + this->qg[t];
 
     // Step 4: Calculate product price
-    this->pg[t] = std::max(0.0, (this->A[t] * pe + this->B[t]) * (1.0 + this->m[t])); // GOES TO ZERO FOR SOME
+    this->pg[t] = std::max(0.0, (this->A[t] * pe + this->B[t]) * (1.0 + this->m[t])); 
  
     // Step 5: Return tax amount = emissions × permit price
     return this->e[t] * pe;

@@ -211,8 +211,10 @@ std::vector<double> Environment::reset() {
     return obs_init;
 }
 
-Environment::Environment(double target_) : 
-                            params(), sector(params), emissions_target(target_) {
+Environment::Environment(double target_, double chi_) : 
+                            params(), sector(params), 
+                            emissions_target(target_),
+                            chi(chi_)   {
 
     std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
     std::vector<double> init_obs = Environment::reset();   
@@ -220,7 +222,12 @@ Environment::Environment(double target_) :
 }
 
 void Environment::outputTxt() {
-    const std::string fileName = "EmissionsVsTaxData.txt";
+    std::string fileName = "EmissionsVsTaxDataChi";
+    std::string chiString = std::to_string(this->chi);
+
+    fileName += chiString;
+    fileName += ".txt";
+
     this->emissionsVsTax.open(fileName);
     this->emissionsVsTax << "EMISSIONS TAX PG\n";
 
