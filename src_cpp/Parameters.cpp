@@ -2,14 +2,59 @@
 
 inline double Parameters::random_val(int idx) {
     std::uniform_real_distribution<> dist(this->range.bounds[idx][0], this->range.bounds[idx][1]);
-    return dist(rng);
+    return dist(this->rng);
 }
 
-Parameters::Parameters() {
+void Parameters::applyTechScenario(TechScenario scenario) {
 
-    std::random_device rd;
-    rng = std::mt19937(rd());
-    
+    // OPTIMISTIC, PESSIMISTIC, AVERAGE TECH SCENARIOS.
+
+    switch (scenario) {
+        case TechScenario::OPTIMISTIC: {
+            this->range.bounds[10][0] = 0.6; this->range.bounds[10][1] = 0.87;      ///< α_{pot} higher potential
+            this->range.bounds[11][0] = 1.0; this->range.bounds[11][1] = 3.0;       ///< α_{costs} lower cost
+            this->range.bounds[12][0] = 0.0; this->range.bounds[12][1] = 0.2;       ///< Δα_{costs} less heterogeneity
+            break;
+        }
+        case TechScenario::PESSIMISTIC: {
+            this->range.bounds[10][0] = 0.17; this->range.bounds[10][1] = 0.44;     ///< α_{pot} lower potential
+            this->range.bounds[11][0] = 8.0; this->range.bounds[11][1] = 10.0;      ///< α_{costs} higher cost
+            this->range.bounds[12][0] = 0.2; this->range.bounds[12][1] = 0.4;       ///< Δα_{costs} more heterogeneity
+        }
+        // ELSE KEEP PARAM RANGE AS IS
+        case TechScenario::AVERAGE: 
+        default:
+            break;
+    }
+
+    std::cout << "Tech scenario set: ";
+    if (scenario == TechScenario::OPTIMISTIC) std::cout << "OPTIMISTIC\n";
+    else if (scenario == TechScenario::PESSIMISTIC) std::cout << "PESSIMISTIC\n";
+    else std::cout << "AVERAGE\n";
+}
+
+Parameters::Parameters(const std::string tech_scenario, const int fixed_seed) {
+
+    // SET TECH SCENARIO:
+    if (tech_scenario == "OPTIMISTIC" || tech_scenario == "optimistic") {
+        this->scenario = TechScenario::OPTIMISTIC;
+    } else if (tech_scenario == "PESSMISTIC" || tech_scenario == "pessimistic") {
+        this->scenario = TechScenario::PESSIMISTIC;
+    } else {
+        this->scenario = TechScenario::AVERAGE;
+    }
+    this->applyTechScenario(this->scenario);
+
+    // SET RNG:
+
+    if (fixed_seed == -1) {
+        std::random_device rd;
+        this->rng = std::mt19937(rd());
+    } else {
+        this->rng = std::mt19937(fixed_seed);
+        //std::cout << "Fixed seed used: " << fixed_seed << std::endl;
+    }
+
     // GENERATE RANDOM VAL IN BOUNDS
     //this->N = static_cast<int>(std::round(Parameters::random_val(0)));
     this->N = 50;

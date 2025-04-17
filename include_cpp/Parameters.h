@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+// BASELINE RANGE
 struct param_range {
     double bounds[16][2] = {{30, 50},           ///< 00 - N - Number of firms
                             {0.1, 0.5},         ///< 01 - γ - Price sensitivity of demand
@@ -27,11 +28,16 @@ struct param_range {
                             {0.0, 3.0}};        ///< 15 - μ_1,μ_2,μ_3 - Expectation Rule
 };
 
+enum class TechScenario { AVERAGE, OPTIMISTIC, PESSIMISTIC };
+
 class Parameters {
 
     private:
 
         param_range range;
+        TechScenario scenario;
+
+        void applyTechScenario(TechScenario Scenario);
 
     public:
     
@@ -94,7 +100,7 @@ class Parameters {
         // RNG
         std::mt19937 rng;
 
-        Parameters();
+        Parameters(const std::string tech_scenario = "AVERAGE", const int fixed_seed = -1);
         void generateRandomPar();
 
         inline double random_val(int idx);

@@ -27,7 +27,6 @@ while (not done):
 env.outputTxt()
 
 
-
 def set_seed(env, seed):
     np.random.seed(seed)
     torch.manual_seed(seed)

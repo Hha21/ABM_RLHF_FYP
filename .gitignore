@@ -8,6 +8,7 @@ env
 parameters_list.txt
 test_results.txt
 EmissionsVsTaxData.txt
+*.txt
 
 util_plots.py
 
@@ -35,3 +36,7 @@ __pycache__/
 *.log
 *.swp
 *.DS_Store
+
+*.csv
+
+util_dataprocess.py

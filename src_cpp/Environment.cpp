@@ -185,7 +185,7 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
 }
 
 std::vector<double> Environment::reset() {
-    this->params = Parameters();
+    this->params = Parameters(this->tech_mode, this->seed);
     this->sector = Sector(this->params);
 
     this->t = this->params.t_start;
@@ -211,10 +211,12 @@ std::vector<double> Environment::reset() {
     return obs_init;
 }
 
-Environment::Environment(double target_, double chi_) : 
-                            params(), sector(params), 
+Environment::Environment(std::string TECH_MODE, int seed_, double target_, double chi_) : 
+                            params(TECH_MODE, seed), sector(params), 
                             emissions_target(target_),
-                            chi(chi_)   {
+                            chi(chi_),
+                            tech_mode(TECH_MODE),
+                            seed(seed_)  {
 
     std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
     std::vector<double> init_obs = Environment::reset();   

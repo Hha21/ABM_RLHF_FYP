@@ -26,6 +26,10 @@ class Environment {
         bool done;                                                                  ///< Termination Criteria
         MDP Markov;                                                                 ///< Current MDP
 
+        // FOR PARAMS
+        const std::string tech_mode;
+        const int seed;
+
         const double chi;
 
         const double tax_limit = 3.0;
@@ -65,7 +69,7 @@ class Environment {
 
     public: 
 
-        Environment(double target_ = 0.2, double chi_ = 0.5);
+        Environment(std::string TECH_MODE = "AVERAGE", int seed_ = -1, double target_ = 0.2, double chi_ = 0.5);
 
         MDP step(const int action_idx);
 
