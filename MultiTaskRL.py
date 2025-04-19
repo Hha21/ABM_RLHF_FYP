@@ -12,11 +12,14 @@ import cpp_env
 
 env = cpp_env.Environment()
 
+# Fixed Seed
+ENV_SEED = 42
+
 # Parameters
 state_dim = 203     # (50 firms * 4) + 3 sector features
 action_dim = 10     # discrete action space
 
-# Multi-Task Q Net.
+# Multi-Task RANKER Q Net.
 class MultiTaskQNet(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
@@ -80,7 +83,7 @@ class MultiTaskAgent:
         self.gamma = 0.99
         self.memory = deque(maxlen = 5000)
         self.batch_size = 64                        #Init
-        self.epsilon = 1.0
+        self.epsilon = 0.5
         self.decay_rate = decay_rate
         self.chi = chi
         self.temp = temperature
@@ -89,9 +92,12 @@ class MultiTaskAgent:
         self.loss_a_rec = 0.0
 
     def get_action(self, state):
-    
+        
+        # IF EPSILON GET RANDOM ACTION
         if (random.random() < self.epsilon):
             return random.randint(0, action_dim - 1)
+
+        # ELSE SAMPLE POLICY
 
         state = torch.FloatTensor(state).unsqueeze(0)
         emissions_q, agree_q = self.net(state)
@@ -130,15 +136,18 @@ class MultiTaskAgent:
         next_agree_q = next_agree_q.max(1)[0]
 
         # REGRESSION TARGET
-        target_e = rew_e
-        target_a = rew_a
+        target_e = rew_e + self.gamma * next_emissions_q * (1 - dones)
+        target_a = rew_a + self.gamma * next_agree_q * (1 - dones)
+
+        target_e = target_e.clamp(-1.0, 1.0)
+        target_a = target_a.clamp(-1.0, 1.0)
 
         # LOSS
         loss_e = nn.MSELoss()(emissions_q, target_e.detach())
         loss_a = nn.MSELoss()(agree_q, target_a.detach())
 
-        self.loss_e_rec  = loss_e
-        self.loss_a_rec  = loss_a
+        self.loss_e_rec  = loss_e.detach().item()
+        self.loss_a_rec  = loss_a.detach().item()
 
         # ZERO ALL
         self.optimiser_shared.zero_grad()
@@ -182,10 +191,12 @@ def train(env, agent, episodes):
         total_rewards.append((total_reward_e + total_reward_a))
         total_MSE_losses_e.append(agent.loss_e_rec)
         total_MSE_losses_a.append(agent.loss_a_rec)
+    
+    return total_MSE_losses_e, total_MSE_losses_a
 
 # DEPLOY AGENT 
 def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
-    newenv = cpp_env.Environment(target = 0.2, chi = chi_)
+    newenv = cpp_env.Environment("AVERAGE", ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
 
     done = False
@@ -204,8 +215,19 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
     newenv.outputTxt()
 
 agent = MultiTaskAgent(state_dim, action_dim, 0.99999)
-episodes = 3000
-train(env, agent, episodes) 
+episodes = 1000
+losses_e, losses_a = train(env, agent, episodes) 
+
+plt.figure(figsize=(12, 6))
+plt.plot(losses_e, label='Emissions Q Loss')
+plt.plot(losses_a, label='Agreeableness Q Loss')
+plt.xlabel("Episode")
+plt.ylabel("Loss (MSE)")
+plt.title("Q-Value Head Losses Over Training")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 deploy_agent(agent, chi_ = 0.1, temperature = 0.1)
 deploy_agent(agent, chi_ = 0.7, temperature = 0.1)

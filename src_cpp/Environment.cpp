@@ -224,10 +224,20 @@ Environment::Environment(std::string TECH_MODE, int seed_, double target_, doubl
 }
 
 void Environment::outputTxt() {
-    std::string fileName = "EmissionsVsTaxDataChi";
+    std::string fileName = "EmissionsVsTaxData_Chi";
     std::string chiString = std::to_string(this->chi);
 
-    fileName += chiString;
+    fileName += chiString.substr(0, 4);
+
+    if (this->seed != -1) {
+        std::string seedString = "_SEED" + std::to_string(this->seed);
+        fileName += seedString;
+    }
+
+    if (this->tech_mode != "AVERAGE" || this->tech_mode != "average") {
+        fileName += "_MODE" + this->tech_mode;
+    }
+
     fileName += ".txt";
 
     this->emissionsVsTax.open(fileName);
