@@ -143,11 +143,6 @@ std::vector<double> Environment::observe() {
     current_obs[endIdx + 0] = E_recent;
     current_obs[endIdx + 1] = this->new_action;
     current_obs[endIdx + 2] = CC_recent;
-    
-    // std::cout << "OBS VECTOR (t = " << t_curr << "): ";
-    // for (int i = 0; i < this->observation_dim; ++i) {
-    //     std::cout << current_obs[i] << std::endl;
-    // }
 
     return current_obs;
 }
