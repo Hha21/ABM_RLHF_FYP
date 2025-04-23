@@ -82,7 +82,7 @@ class MultiTaskAgent:
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
         self.optimiser_emissions = torch.optim.Adam(self.net.emissions_head.parameters(), lr = 1e-4)
         self.optimiser_agreeableness = torch.optim.Adam(self.net.agreeableness_task_head.parameters(), lr = 1e-4)
-        self.optimiser_shared = torch.optim.Adam(self.net.shared_layers.parameters(), lr = 5e-4)
+        self.optimiser_shared = torch.optim.Adam(self.net.shared_layers.parameters(), lr = 1e-3)
 
         self.gamma = 0.99                           #Discount Factor
         self.memory = deque(maxlen = 15000)
@@ -271,8 +271,8 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
 
     newenv.outputTxt()
 
-agent = MultiTaskAgent(state_dim, action_dim, 0.99999)
-episodes = 3000
+agent = MultiTaskAgent(state_dim, action_dim, 0.9999)
+episodes = 2000
 losses_e, losses_a = train(env, agent, episodes) 
 
 deploy_agent(agent, chi_ = 0.1, temperature = 0.01)

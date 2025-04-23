@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-file_path = "./EmissionsVsTaxData_Chi0.70_SEED42_MODEAVERAGE.txt"
+file_path = "./EmissionsVsTaxData_Chi0.10_SEED42_MODEAVERAGE.txt"
 data = pd.read_csv(file_path, delim_whitespace=True, skiprows=1, names=["Emissions", "Tax", "Price of Goods"])
 
 data["Time"] = range(1, len(data) + 1)
