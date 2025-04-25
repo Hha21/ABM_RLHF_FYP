@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np 
 import random
 from collections import deque
+from copy import deepcopy
 import sys
 import matplotlib.pyplot as plt
 
@@ -46,6 +47,7 @@ class MultiTaskQNet(nn.Module):
 
         # EMISSIONS TASK HEAD
         self.emissions_head = nn.Sequential(
+            nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, action_dim)
@@ -53,6 +55,7 @@ class MultiTaskQNet(nn.Module):
 
         # AGREEABLENESS TASK HEAD
         self.agreeableness_task_head = nn.Sequential(
+            nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, action_dim)
@@ -80,29 +83,30 @@ class MultiTaskAgent:
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
-        self.optimiser_emissions = torch.optim.Adam(self.net.emissions_head.parameters(), lr = 1e-4)
-        self.optimiser_agreeableness = torch.optim.Adam(self.net.agreeableness_task_head.parameters(), lr = 1e-4)
-        self.optimiser_shared = torch.optim.Adam(self.net.shared_layers.parameters(), lr = 1e-3)
+        self.optimiser_emissions = torch.optim.Adam(self.net.emissions_head.parameters(), lr = 5e-5)
+        self.optimiser_agreeableness = torch.optim.Adam(self.net.agreeableness_task_head.parameters(), lr = 5e-5)
+        self.optimiser_shared = torch.optim.Adam(self.net.shared_layers.parameters(), lr = 2.5e-4)
 
-        self.gamma = 0.99                           #Discount Factor
-        self.memory = deque(maxlen = 15000)
+        self.gamma = 0.95                           #Discount Factor
+        self.memory = deque(maxlen = 20000)
         self.batch_size = 256                       #Init
         self.chi = chi                              #Chi for Ranker
 
         self.decay_rate = decay_rate
         self.temp = temperature
-        self.temp_min = 0.1
+        self.temp_min = 0.01
 
         self.loss_e_rec = 0.0
         self.loss_a_rec = 0.0
 
-        self.warmup_steps = 5000
+        self.warmup_steps = 10000
 
-    def get_action(self, state, chi=None):
-        
-        if chi is None:
-            # BALANCE REWARDS
-            chi = chi_train = np.random.beta(a=2, b=3)
+        # TARGET NETWORK
+        self.target_net = deepcopy(self.net)
+        self.target_update_freq = 10
+        self.update_counter = 0
+
+    def get_action(self, state, chi = 0.5):
 
         state = torch.FloatTensor(state).unsqueeze(0)
         emissions_q, agree_q = self.net(state)
@@ -123,10 +127,13 @@ class MultiTaskAgent:
         if len(self.memory) < self.warmup_steps:
             return None, None, None, None
 
+        # GET PAST EXPERIENCES
         batch = random.sample(self.memory, self.batch_size)
         states, actions, rew_e, rew_a, next_states, dones = zip(*batch)
+
+        # CONVERT TO TENSOR
         states = torch.FloatTensor(states)
-        actions = torch.LongTensor(actions).unsqueeze(1)
+        actions = torch.LongTensor(actions).unsqueeze(1)            #taken actions
         rew_e = torch.FloatTensor(rew_e)
         rew_a = torch.FloatTensor(rew_a)
         next_states = torch.FloatTensor(next_states)
@@ -135,20 +142,21 @@ class MultiTaskAgent:
         # CURRENT Q-VALUES
         emissions_q, agree_q = self.net(states)                     #shape: [batch_size, action_dim]
 
-        emissions_q = emissions_q.gather(1, actions).squeeze(1)     #taken action
+        emissions_q = emissions_q.gather(1, actions).squeeze(1)     #Q-value pred. for taken actions
         agree_q = agree_q.gather(1, actions).squeeze(1)
 
-        # NEXT Q-VALUES
-        next_emissions_q, next_agree_q = self.net(next_states)
-        next_emissions_q = next_emissions_q.max(1)[0]
+        # NEXT Q-VALUES (TARGET)
+        with torch.no_grad():
+            next_emissions_q, next_agree_q = self.target_net(next_states)
+        next_emissions_q = next_emissions_q.max(1)[0]               # ASSUME OPTIMAL POLICY THEREAFTER
         next_agree_q = next_agree_q.max(1)[0]
 
         # BELLMAN TARGETS   
         target_e = rew_e + self.gamma * next_emissions_q * (1 - dones)
         target_a = rew_a + self.gamma * next_agree_q * (1 - dones)
 
-        # target_e = target_e.clamp(-1.0, 1.0)
-        # target_a = target_a.clamp(-1.0, 1.0)
+        target_e = target_e.clamp(-5.0, 30.0)
+        target_a = target_a.clamp(-5.0, 30.0)
 
         # LOSS
         loss_e = nn.MSELoss()(emissions_q, target_e.detach())
@@ -189,11 +197,19 @@ def train(env, agent, episodes):
         episode_pred_q_e, episode_pred_q_a = [], []
         episode_targets_e, episode_targets_a = [], []
 
+        # FOR TARGET UPDATE
+        agent.update_counter += 1
+        if agent.update_counter % agent.target_update_freq == 0:
+            agent.target_net.load_state_dict(agent.net.state_dict())
+            print(f"TARGET NET UPDATED @ EPISODE {ep}")
+
         while (not done):
 
             # SELECT RANDOM CHI IN TRAINING
-            chi_train = np.random.uniform(0, 1)
-            action = agent.get_action(state, chi=chi_train)
+            chi_train = np.random.uniform(0.05, 0.95)
+            #chi_train = np.random.beta(a=2, b=3)
+
+            action = agent.get_action(state, chi =chi_train)
             next_state, rew_emissions, rew_agree, done = env.step(action)
             agent.remember(state, action, rew_emissions, rew_agree, next_state, done)
 
@@ -220,7 +236,7 @@ def train(env, agent, episodes):
         avg_targets_e.append(np.mean(episode_targets_e) if episode_targets_e else 0)
         avg_targets_a.append(np.mean(episode_targets_a) if episode_targets_a else 0)
 
-        print(f"Episode {ep+1}/{episodes} | Temp: {agent.temp:.3f} | Rew(e,a): ({episode_rewards_e:.2f},{episode_rewards_a:.2f}) | Loss(e,a): ({agent.loss_e_rec:.4f},{agent.loss_a_rec:.4f})")
+        print(f"Episode {ep+1}/{episodes} | Temp: {agent.temp:.3f} | Rew(e,a): ({episode_rewards_e:.2f},{episode_rewards_a:.2f}) | Loss(e,a): ({agent.loss_e_rec:.4f},{agent.loss_a_rec:.4f}), Chi: {chi_train:.3f}")
     
     # VISUALISE
 
@@ -271,9 +287,12 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
 
     newenv.outputTxt()
 
-agent = MultiTaskAgent(state_dim, action_dim, 0.9999)
-episodes = 2000
+agent = MultiTaskAgent(state_dim, action_dim, 0.99999)
+episodes = 7000
 losses_e, losses_a = train(env, agent, episodes) 
 
 deploy_agent(agent, chi_ = 0.1, temperature = 0.01)
+deploy_agent(agent, chi_ = 0.3, temperature = 0.01)
+deploy_agent(agent, chi_ = 0.5, temperature = 0.01)
 deploy_agent(agent, chi_ = 0.7, temperature = 0.01)
+deploy_agent(agent, chi_ = 0.9, temperature = 0.01)
