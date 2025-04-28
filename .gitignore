@@ -38,5 +38,6 @@ __pycache__/
 *.DS_Store
 
 *.csv
+*Zone.Identifier
 
 util_dataprocess.py
