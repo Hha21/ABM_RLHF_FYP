@@ -154,6 +154,9 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     static const double CC0_0 = this->init_CC0;
     static const double alpha = 5.0;
 
+    // SIGMOID TEMPERATURE
+    static const double temp_exp = 3.0;
+
     // static const double E_TARGET = E0 * this->emissions_target;
     // static const double inv_denominator = 1.0 / (E0 - E_TARGET);
 
@@ -168,7 +171,7 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
 
     // AGREEABLENESS REWARD
     double agreeableness_util = interpolate_model_1_1(emissions_decrease, price_increase);
-    double agreeableness_reward = 1.0 / (1.0 + std::exp(-agreeableness_util));
+    double agreeableness_reward = 1.0 / (1.0 + std::exp(- temp_exp * agreeableness_util));
     
     // EMISSIONS REWARD
     const double exponent = -alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO);

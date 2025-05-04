@@ -25,23 +25,23 @@ class MultiTaskQNet(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
 
-        # FIRM FEATURES
+        # FIRM FEATURES (2 * 200 [t, t-1])
         self.firm_branch = nn.Sequential(
-            nn.Linear(200, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(400, 512), nn.ReLU(),
+            nn.Linear(512, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU()
         )
 
-        # SECTOR FEATURES
+        # SECTOR FEATURES (2 * 3 [t, t-1] + chi)
         self.sector_branch = nn.Sequential(
-            nn.Linear(4, 32), nn.ReLU(),
+            nn.Linear(7, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
-            nn.Linear(32, 32), nn.ReLU()
+            nn.Linear(32, 16), nn.ReLU()
         )
 
         # SHARED LAYERS
         self.shared_layers = nn.Sequential(
-            nn.Linear(128 + 32, 256), nn.ReLU(),
+            nn.Linear(128 + 16, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU(),
         )
 
@@ -61,7 +61,7 @@ class MultiTaskQNet(nn.Module):
             nn.Linear(64, action_dim)
         )
     
-    def forward(self, state, chi):
+    def forward(self, state, prev_state, chi):
         
         # [200]
         firm_features = state[:, :200]
@@ -69,10 +69,15 @@ class MultiTaskQNet(nn.Module):
         # [3]
         sector_features = state[:, 200:]
 
-        sector_features = torch.cat([sector_features, chi.unsqueeze(-1)], dim = 1)
+        prev_firm_features = prev_state[:, :200]
+        prev_sector_features = prev_state[:, 200:]
 
-        firm_out = self.firm_branch(firm_features)
-        sector_out = self.sector_branch(sector_features)
+        firm_input = torch.cat([firm_features, prev_firm_features], dim=1)
+
+        sector_input = torch.cat([sector_features, prev_sector_features, chi.unsqueeze(-1)], dim=1)
+
+        firm_out = self.firm_branch(firm_input)
+        sector_out = self.sector_branch(sector_input)
 
         combined = torch.cat([firm_out, sector_out], dim = 1)
         shared = self.shared_layers(combined)
@@ -84,7 +89,7 @@ class MultiTaskQNet(nn.Module):
 
 # AGENT
 class MultiTaskAgent:
-    def __init__(self, state_dim, action_dim, decay_rate = 0.9995, chi=0.5, temperature = 2.0):
+    def __init__(self, state_dim, action_dim, decay_rate = 0.998, chi=0.5, temperature = 2.0):
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
@@ -111,10 +116,12 @@ class MultiTaskAgent:
         self.target_update_freq = 10
         self.update_counter = 0
 
-    def get_action(self, state, chi):
+    def get_action(self, state, prev_state, chi):
 
         state = torch.FloatTensor(state).unsqueeze(0)
-        emissions_q, agree_q = self.net(state, chi)
+        prev_state = torch.FloatTensor(prev_state).unsqueeze(0)
+
+        emissions_q, agree_q = self.net(state, prev_state, chi)
         combined_q = emissions_q + (chi) * agree_q
 
         action_probs = torch.softmax(combined_q / self.temp, dim=1)
@@ -122,8 +129,8 @@ class MultiTaskAgent:
 
         return action
 
-    def remember(self, state, action, rew_emissions, rew_agree, next_state, done, chi):
-        self.memory.append([state, action, rew_emissions, rew_agree, next_state, done, chi])
+    def remember(self, state, action, rew_emissions, rew_agree, next_state, done, chi, prev_state):
+        self.memory.append([state, action, rew_emissions, rew_agree, next_state, done, chi, prev_state])
 
     def replay(self):
         if len(self.memory) < self.warmup_steps:
@@ -131,10 +138,11 @@ class MultiTaskAgent:
 
         # GET PAST EXPERIENCES
         batch = random.sample(self.memory, self.batch_size)
-        states, actions, rew_e, rew_a, next_states, dones, chis = zip(*batch)
+        states, actions, rew_e, rew_a, next_states, dones, chis, prev_states = zip(*batch)
 
         # CONVERT TO TENSOR
         states = torch.FloatTensor(states)
+        prev_states = torch.FloatTensor(prev_states)
         actions = torch.LongTensor(actions).unsqueeze(1)            #taken actions
         rew_e = torch.FloatTensor(rew_e)
         rew_a = torch.FloatTensor(rew_a)
@@ -143,14 +151,14 @@ class MultiTaskAgent:
         chis = torch.FloatTensor(chis)
 
         # CURRENT Q-VALUES
-        emissions_q, agree_q = self.net(states, chi=chis)           #shape: [batch_size, action_dim]
+        emissions_q, agree_q = self.net(states, prev_states, chi=chis)           #shape: [batch_size, action_dim]
 
         emissions_q = emissions_q.gather(1, actions).squeeze(1)     #Q-value pred. for taken actions
         agree_q = agree_q.gather(1, actions).squeeze(1)
 
         # NEXT Q-VALUES (TARGET)
         with torch.no_grad():
-            next_emissions_q, next_agree_q = self.target_net(next_states, chi=chis)
+            next_emissions_q, next_agree_q = self.target_net(next_states, prev_states, chi=chis)
         next_emissions_q = next_emissions_q.max(1)[0]               # ASSUME OPTIMAL POLICY THEREAFTER
         next_agree_q = next_agree_q.max(1)[0]
 
@@ -193,6 +201,7 @@ def train(env, agent, episodes):
 
     for ep in range (episodes):
         state = env.reset()
+        prev_state = np.zeros(203)  #Init Prev State to Zeros
         done = False
 
         episode_rewards_e, episode_rewards_a = 0, 0
@@ -209,24 +218,29 @@ def train(env, agent, episodes):
         while (not done):
 
             # CURRICULUM CHI
-            if ep < 1000:
-                chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.15)])
-            elif ep < 2000:
-                chi_train = torch.FloatTensor([np.random.uniform(0.2, 0.4)])
-            elif ep < 3000:
-                chi_train = torch.FloatTensor([np.random.uniform(0.4, 0.6)])
-            elif ep < 4000:
-                chi_train = torch.FloatTensor([np.random.uniform(0.6, 0.8)])
-            elif ep < 5000:
-                chi_train = torch.FloatTensor([np.random.uniform(0.8, 1.0)])
-            else:
-                chi_train = torch.FloatTensor([np.random.uniform(0.0, 1.0)])
+            # if ep < 1000:
+            #     chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.15)])
+            # elif ep < 2000:
+            #     chi_train = torch.FloatTensor([np.random.uniform(0.2, 0.4)])
+            # elif ep < 3000:
+            #     chi_train = torch.FloatTensor([np.random.uniform(0.4, 0.6)])
+            # elif ep < 4000:
+            #     chi_train = torch.FloatTensor([np.random.uniform(0.6, 0.8)])
+            # elif ep < 5000:
+            #     chi_train = torch.FloatTensor([np.random.uniform(0.8, 1.0)])
+            # else:
+            #     chi_train = torch.FloatTensor([np.random.uniform(0.0, 1.0)])
 
-            action = agent.get_action(state, chi = chi_train)
+            chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
+
+            action = agent.get_action(state, prev_state, chi = chi_train)
             next_state, rew_emissions, rew_agree, done = env.step(action)
-            agent.remember(state, action, rew_emissions, rew_agree, next_state, done, chi_train)
+            agent.remember(state, action, rew_emissions, rew_agree, next_state, done, chi_train, prev_state)
 
+            # UPDATE STATES
+            prev_state = state
             state = next_state
+
             episode_rewards_e += rew_emissions
             episode_rewards_a += rew_agree
 
@@ -288,24 +302,27 @@ def train(env, agent, episodes):
 def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
     newenv = cpp_env.Environment("AVERAGE", ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
-
+    prev_state = np.zeros(203)
     done = False
 
     while (not done):
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        emissions_q, agree_q = agent.net(state_tensor, chi=torch.FloatTensor([chi_]))
+        prev_state_tensor = torch.FloatTensor(prev_state).unsqueeze(0)
+
+        emissions_q, agree_q = agent.net(state_tensor, prev_state_tensor, chi=torch.FloatTensor([chi_]))
 
         combined_q = emissions_q + chi_ * agree_q
 
         action_probs = torch.softmax(combined_q / temperature, dim = 1)
         action = torch.multinomial(action_probs, num_samples=1).item()
-        
+
+        prev_state = state
         state, _, _, done = newenv.step(action)
 
     newenv.outputTxt()
 
 agent = MultiTaskAgent(state_dim, action_dim)
-episodes = 6000
+episodes = 500
 losses_e, losses_a = train(env, agent, episodes) 
 
 deploy_agent(agent, chi_ = 0.1, temperature = 0.01)
