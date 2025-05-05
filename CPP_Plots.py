@@ -1,7 +1,9 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-file_path = "./EmissionsVsTaxData_Chi0.10_SEED42_MODEAVERAGE.txt"
+#file_path = "./EmissionsVsTaxData_Chi0.90_SEED42_MODEAVERAGE.txt"
+file_path = "./EmissionsVsTaxData_Chi0.90_SEED42_MODEPESSIMISTIC.txt"
+
 data = pd.read_csv(
     file_path,
     delim_whitespace=True,

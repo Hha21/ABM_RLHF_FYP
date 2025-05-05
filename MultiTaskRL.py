@@ -299,8 +299,8 @@ def train(env, agent, episodes):
     return total_losses_e, total_losses_a
 
 # DEPLOY AGENT 
-def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
-    newenv = cpp_env.Environment("AVERAGE", ENV_SEED, target = 0.2, chi = chi_)
+def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
+    newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
     prev_state = np.zeros(203)
     done = False
@@ -322,11 +322,18 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0):
     newenv.outputTxt()
 
 agent = MultiTaskAgent(state_dim, action_dim)
-episodes = 500
+episodes = 2000
 losses_e, losses_a = train(env, agent, episodes) 
 
-deploy_agent(agent, chi_ = 0.1, temperature = 0.01)
-deploy_agent(agent, chi_ = 0.3, temperature = 0.01)
-deploy_agent(agent, chi_ = 0.5, temperature = 0.01)
-deploy_agent(agent, chi_ = 0.7, temperature = 0.01)
-deploy_agent(agent, chi_ = 0.9, temperature = 0.01)
+deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")
+deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "OPTIMISTIC")
+deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "OPTIMISTIC")
+deploy_agent(agent, chi_ = 0.7, temperature = 0.01, scenario = "OPTIMISTIC")
+deploy_agent(agent, chi_ = 0.9, temperature = 0.01, scenario = "OPTIMISTIC")
+
+deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "PESSIMISTIC")
+deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "PESSIMISTIC")
+deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "PESSIMISTIC")
+deploy_agent(agent, chi_ = 0.7, temperature = 0.01, scenario = "PESSIMISTIC")
+deploy_agent(agent, chi_ = 0.9, temperature = 0.01, scenario = "PESSIMISTIC")
+

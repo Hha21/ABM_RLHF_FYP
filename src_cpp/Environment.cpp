@@ -155,7 +155,7 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     static const double alpha = 5.0;
 
     // SIGMOID TEMPERATURE
-    static const double temp_exp = 3.0;
+    static const double temp_exp = 0.5;     // 3.0
 
     // static const double E_TARGET = E0 * this->emissions_target;
     // static const double inv_denominator = 1.0 / (E0 - E_TARGET);
