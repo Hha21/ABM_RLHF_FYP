@@ -183,7 +183,8 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
 }
 
 std::vector<double> Environment::reset() {
-    this->params = Parameters(this->tech_mode, this->seed);
+        
+    this->params = Parameters(this->techno_mode, this->seed);
     this->sector = Sector(this->params);
 
     this->t = this->params.t_start;
@@ -210,13 +211,16 @@ std::vector<double> Environment::reset() {
 }
 
 Environment::Environment(std::string TECH_MODE, int seed_, double target_, double chi_) : 
-                            params(TECH_MODE, seed), sector(params), 
+                            techno_mode(TECH_MODE),
+                            seed(seed_), 
                             emissions_target(target_),
                             chi(chi_),
-                            tech_mode(TECH_MODE),
-                            seed(seed_)  {
+                            params(TECH_MODE, seed_),
+                            sector(params)   {
+
 
     std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
+
     std::vector<double> init_obs = Environment::reset();   
 
 }
@@ -232,8 +236,8 @@ void Environment::outputTxt() {
         fileName += seedString;
     }
 
-    if (this->tech_mode != "AVERAGE" || this->tech_mode != "average") {
-        fileName += "_MODE" + this->tech_mode;
+    if (this->techno_mode != "AVERAGE" || this->techno_mode != "average") {
+        fileName += "_MODE" + this->techno_mode;
     }
 
     fileName += ".txt";

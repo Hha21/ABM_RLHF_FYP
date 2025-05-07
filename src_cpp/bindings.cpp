@@ -11,7 +11,7 @@ PYBIND11_MODULE(cpp_env, m) {
     m.doc() = "C++ ABM Environment Module";
 
     py::class_<Environment>(m, "Environment")
-        .def(py::init<std::string, int, double, double>(), py::arg("tech-mode") = "AVERAGE", py::arg("seed") = -1, py::arg("target") = 0.2, py::arg("chi") = 0.5)
+        .def(py::init<std::string, int, double, double>(), py::arg("tech_mode") = "AVERAGE", py::arg("seed") = -1, py::arg("target") = 0.2, py::arg("chi") = 0.5)
         .def("reset", &Environment::reset)
         .def("step", &Environment::step)
         // .def("action_space", &Environment::getActionSpace)

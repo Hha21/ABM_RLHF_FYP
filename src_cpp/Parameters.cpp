@@ -11,15 +11,15 @@ void Parameters::applyTechScenario(TechScenario scenario) {
 
     switch (scenario) {
         case TechScenario::OPTIMISTIC: {
-            this->range.bounds[10][0] = 0.6; this->range.bounds[10][1] = 0.87;      ///< α_{pot} higher potential
-            this->range.bounds[11][0] = 1.0; this->range.bounds[11][1] = 3.0;       ///< α_{costs} lower cost
-            this->range.bounds[12][0] = 0.0; this->range.bounds[12][1] = 0.2;       ///< Δα_{costs} less heterogeneity
+            this->range.bounds[10][0] = 0.8; this->range.bounds[10][1] = 0.87;      ///< α_{pot} higher potential
+            this->range.bounds[11][0] = 1.0; this->range.bounds[11][1] = 2.0;       ///< α_{costs} lower cost
+            this->range.bounds[12][0] = 0.0; this->range.bounds[12][1] = 0.05;       ///< Δα_{costs} less heterogeneity
             break;
         }
         case TechScenario::PESSIMISTIC: {
-            this->range.bounds[10][0] = 0.17; this->range.bounds[10][1] = 0.44;     ///< α_{pot} lower potential
-            this->range.bounds[11][0] = 8.0; this->range.bounds[11][1] = 10.0;      ///< α_{costs} higher cost
-            this->range.bounds[12][0] = 0.2; this->range.bounds[12][1] = 0.4;       ///< Δα_{costs} more heterogeneity
+            this->range.bounds[10][0] = 0.17; this->range.bounds[10][1] = 0.20;     ///< α_{pot} lower potential
+            this->range.bounds[11][0] = 9.0; this->range.bounds[11][1] = 10.0;      ///< α_{costs} higher cost
+            this->range.bounds[12][0] = 0.35; this->range.bounds[12][1] = 0.4;       ///< Δα_{costs} more heterogeneity
         }
         // ELSE KEEP PARAM RANGE AS IS
         case TechScenario::AVERAGE: 
@@ -38,7 +38,7 @@ Parameters::Parameters(const std::string tech_scenario, const int fixed_seed) {
     // SET TECH SCENARIO:
     if (tech_scenario == "OPTIMISTIC" || tech_scenario == "optimistic") {
         this->scenario = TechScenario::OPTIMISTIC;
-    } else if (tech_scenario == "PESSMISTIC" || tech_scenario == "pessimistic") {
+    } else if (tech_scenario == "PESSIMISTIC" || tech_scenario == "pessimistic") {
         this->scenario = TechScenario::PESSIMISTIC;
     } else {
         this->scenario = TechScenario::AVERAGE;
@@ -52,7 +52,7 @@ Parameters::Parameters(const std::string tech_scenario, const int fixed_seed) {
         this->rng = std::mt19937(rd());
     } else {
         this->rng = std::mt19937(fixed_seed);
-        //std::cout << "Fixed seed used: " << fixed_seed << std::endl;
+        std::cout << "Fixed seed: " << fixed_seed << std::endl;
     }
 
     // GENERATE RANDOM VAL IN BOUNDS

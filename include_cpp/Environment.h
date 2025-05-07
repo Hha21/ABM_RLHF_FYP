@@ -27,12 +27,12 @@ class Environment {
         MDP Markov;                                                                 ///< Current MDP
 
         // FOR PARAMS
-        const std::string tech_mode;
+        const std::string techno_mode;
         const int seed;
 
         const double chi;
 
-        const double tax_limit = 3.0;
+        const double tax_limit = 5.0;
         double last_action = 0.0;
         double new_action = 0.0;
 
