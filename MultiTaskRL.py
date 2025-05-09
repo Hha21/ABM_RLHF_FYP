@@ -122,7 +122,7 @@ class MultiTaskAgent:
         prev_state = torch.FloatTensor(prev_state).unsqueeze(0)
 
         emissions_q, agree_q = self.net(state, prev_state, chi)
-        combined_q = emissions_q + (chi) * agree_q
+        combined_q = (1.0 - chi) * emissions_q + (chi) * agree_q
 
         action_probs = torch.softmax(combined_q / self.temp, dim=1)
         action = torch.multinomial(action_probs, num_samples = 1).item()
@@ -311,7 +311,7 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
 
         emissions_q, agree_q = agent.net(state_tensor, prev_state_tensor, chi=torch.FloatTensor([chi_]))
 
-        combined_q = emissions_q + chi_ * agree_q
+        combined_q = (1 - chi_) * emissions_q + chi_ * agree_q
 
         action_probs = torch.softmax(combined_q / temperature, dim = 1)
         action = torch.multinomial(action_probs, num_samples=1).item()
@@ -322,7 +322,7 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
     newenv.outputTxt()
 
 agent = MultiTaskAgent(state_dim, action_dim)
-episodes = 2000
+episodes = 1800
 losses_e, losses_a = train(env, agent, episodes) 
 
 deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")

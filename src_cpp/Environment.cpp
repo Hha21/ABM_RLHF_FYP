@@ -155,7 +155,7 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     static const double alpha = 5.0;
 
     // SIGMOID TEMPERATURE
-    static const double temp_exp = 0.5;     // 3.0
+    static const double temp_exp = 0.5;     // 1.5 prev
 
     // static const double E_TARGET = E0 * this->emissions_target;
     // static const double inv_denominator = 1.0 / (E0 - E_TARGET);
@@ -172,10 +172,28 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     // AGREEABLENESS REWARD
     double agreeableness_util = interpolate_model_1_1(emissions_decrease, price_increase);
     double agreeableness_reward = 1.0 / (1.0 + std::exp(- temp_exp * agreeableness_util));
+
+    double penalty;
+    if (price_increase > 0.6) {
+        penalty = std::exp(-2.0 * (price_increase - 0.6));
+    } else {
+        penalty = 1.0;
+    }
+
+    agreeableness_reward *= penalty;
     
     // EMISSIONS REWARD
-    const double exponent = -alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO);
-    double emissions_reward = std::exp(exponent);
+    const double beta = 0.08;
+    double emissions_reward;
+
+    if (emissions_decrease <= TARGET_RATIO) {
+        emissions_reward = std::exp(-alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO));
+    } else {
+        emissions_reward = std::exp(-alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO) / beta);
+    }
+
+    // const double exponent = -alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO);
+    // double emissions_reward = std::exp(exponent);
 
     std::array<double, 2> reward = {emissions_reward, agreeableness_reward};
 
