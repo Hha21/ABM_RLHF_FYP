@@ -1,213 +1,408 @@
 import torch
 import torch.nn as nn
-import numpy as np
+import numpy as np 
 import random
-import matplotlib.pyplot as plt
-import sys
+from collections import deque
 from copy import deepcopy
+import sys
+import matplotlib.pyplot as plt
 from torch.distributions import Normal  
 
 sys.path.insert(1, "./build")
 
-#from ABM_env import ClimatePolicyEnv
-
+# GET .so ENV
+sys.path.insert(1, "./build")
 import cpp_env
-print(dir(cpp_env))
 
-env = cpp_env.Environment()
-cumulative_reward = 0
-emissions_total = 0
+# Fixed Seed
+ENV_SEED = 42
 
-done = False
+# Parameters
+state_dim = 203     # (50 firms * 4) + 3 sector features
+action_dim = 1
 
-while (not done):
-    [obs, reward_emissions, reward_agree, done] = env.step(7)
-    print(f"R_E, R_A = [{reward_emissions}, {reward_agree}]")
-
-env.outputTxt()
-
-
-def set_seed(env, seed):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    random.seed(seed)
-
-class SAC(nn.Module):
-    def __init__ (self, state_dim, action_dim, gamma=0.99, alpha=1e-3, tau=1e-2,
-                    batch_size=64, pi_lr=1e-3, q_lr=1e-3):
-        
+class SACCritic(nn.Module):
+    def __init__(self, state_dim, action_dim):
         super().__init__()
 
-        #Initialise Pi Network Model
-        self.pi_model = nn.Sequential(nn.Linear(state_dim, 128), nn.ReLU(),
-                                nn.Linear(128, 128), nn.ReLU(),
-                                nn.Linear(128, 2*action_dim), nn.Tanh())
+        # FIRM FEATURES (2 * 200 [t, t-1])
+        self.firm_branch = nn.Sequential(
+            nn.Linear(400, 512), nn.ReLU(),
+            nn.Linear(512, 256), nn.ReLU(),
+            nn.Linear(256, 128), nn.ReLU()
+        )
+
+        # SECTOR FEATURES (2 * 3 [t, t-1] + chi + action)
+        self.sector_branch = nn.Sequential(
+            nn.Linear(8, 32), nn.ReLU(),
+            nn.Linear(32, 32), nn.ReLU(),
+            nn.Linear(32, 16), nn.ReLU()
+        )
+
+        # SHARED LAYERS
+        self.shared_layers = nn.Sequential(
+            nn.Linear(128 + 16, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+        )
+
+        # EMISSIONS TASK HEAD
+        self.emissions_head = nn.Sequential(
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 128), nn.ReLU(),
+            nn.Linear(128, 64), nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
+        # AGREEABLENESS TASK HEAD
+        self.agreeableness_task_head = nn.Sequential(
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 128), nn.ReLU(),
+            nn.Linear(128, 64), nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+    
+    def forward(self, state, prev_state, chi, action):
         
-        #Initialise q1 Network Model
-        self.q1_model = nn.Sequential(nn.Linear(state_dim + action_dim, 128), nn.ReLU(),
-                                nn.Linear(128, 128), nn.ReLU(),
-                                nn.Linear(128, 1))
+        # [200]
+        firm_features = state[:, :200]
 
-        #Initialise q2 Network Model
-        self.q2_model = nn.Sequential(nn.Linear(state_dim + action_dim, 128), nn.ReLU(),
-                                nn.Linear(128, 128), nn.ReLU(),
-                                nn.Linear(128, 1))
+        # [3]
+        sector_features = state[:, 200:]
 
+        prev_firm_features = prev_state[:, :200]
+        prev_sector_features = prev_state[:, 200:]
 
-        #Set Hyperparameters : discount, entropy coeff., 
-        # smooth training param., batch size
-        self.gamma = gamma
-        self.alpha = alpha
-        self.tau = tau
-        self.batch_size = batch_size
+        firm_input = torch.cat([firm_features, prev_firm_features], dim=1)
 
-        #Init. Memory
-        self.memory = []
+        if chi.dim() == 1:
+            chi = chi.unsqueeze(1)
+        if action.dim() == 1:
+            action = action.unsqueeze(1)
+        sector_input = torch.cat([sector_features, prev_sector_features, chi, action], dim=1)
 
-        #set gradient descent algorithm
-        self.pi_optimizer = torch.optim.Adam(self.pi_model.parameters(), pi_lr)
-        self.q1_optimizer = torch.optim.Adam(self.q1_model.parameters(), q_lr)
-        self.q2_optimizer = torch.optim.Adam(self.q2_model.parameters(), q_lr)
+        firm_out = self.firm_branch(firm_input)
+        sector_out = self.sector_branch(sector_input)
 
-        #Init. Target Networks
-        self.q1_target_model = deepcopy(self.q1_model)
-        self.q2_target_model = deepcopy(self.q2_model)
+        combined = torch.cat([firm_out, sector_out], dim = 1)
+        shared = self.shared_layers(combined)
 
+        emissions_q = self.emissions_head(shared)
+        agreeableness_q = self.agreeableness_task_head(shared)
 
-    def predict_actions(self, states):
-        #pi model predicts action and log of its probabilities by state
+        return emissions_q, agreeableness_q
 
-        means, log_stds = self.pi_model(states).chunk(2, dim=-1)
-        log_stds = torch.clamp(log_stds, -5, 0)
-        dists = Normal(means, torch.exp(log_stds))
-        actions = dists.rsample()
-        log_probs = dists.log_prob(actions)
+class SACActor(nn.Module):
+    def __init__(self, state_dim, action_dim, action_limit=0.3):
+        super().__init__()
+        # SAME STATE ENCODING (without action)
 
-        return actions, log_probs
+        self.firm_branch = nn.Sequential(
+            nn.Linear(400, 512), nn.ReLU(),
+            nn.Linear(512, 256), nn.ReLU(),
+            nn.Linear(256, 128), nn.ReLU()
+        )
 
-    def get_action(self, state, deterministic = False):
-        #predict action by state
+        # -1 for no action input
+        self.sector_branch = nn.Sequential(
+            nn.Linear(7, 32), nn.ReLU(),
+            nn.Linear(32, 32), nn.ReLU(),
+            nn.Linear(32, 16), nn.ReLU()
+        )
 
+        # shared: (128 + 16) → 256
+        self.shared = nn.Sequential(
+            nn.Linear(128 + 16, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU()
+        )
+
+        # output Gaussian params: 2*action_dim
+        self.mu_logstd = nn.Sequential(
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 2*action_dim), nn.Tanh()
+        )
+
+        self.action_limit = action_limit
+
+    def forward(self, state, prev_state, chi):
+        # state, prev_state: [B,203]; chi: [B,1]
+
+         # [200]
+        firm_features = state[:, :200]
+
+        # [3]
+        sector_features = state[:, 200:]
+
+        prev_firm_features = prev_state[:, :200]
+        prev_sector_features = prev_state[:, 200:]
+
+        firm_input = torch.cat([firm_features, prev_firm_features], dim=1)
+
+        if chi.dim() == 1:
+            chi = chi.unsqueeze(1)
+        sector_input = torch.cat([sector_features, prev_sector_features, chi], dim=1)
+
+        firm_out = self.firm_branch(firm_input)
+        sector_out = self.sector_branch(sector_input)
+
+        combined = torch.cat([firm_out, sector_out], dim = 1)
+        shared = self.shared(combined)
+
+        mu, logstd = self.mu_logstd(shared).chunk(2, dim=-1)
+        logstd = torch.clamp(logstd, -5, 2)
+        std = torch.exp(logstd)
+        dist = Normal(mu, std)
+
+        return dist
+
+    def get_action(self, state, prev_state, chi, deterministic=False):
+        
         state = torch.FloatTensor(state).unsqueeze(0)
+        prev_state = torch.FloatTensor(prev_state).unsqueeze(0)
+
+        dist = self.forward(state, prev_state, chi)
 
         if deterministic:
-            means, _ = self.pi_model(state).chunk(2, dim=-1)
-            action = means.squeeze(1).detach().numpy() 
+            action = dist.mean
         else:
-            action, _ = self.predict_actions(state)
-            action = action.squeeze(1).detach().numpy()
+            action = dist.rsample()
+        # scale to action_limit
+        return torch.tanh(action).item() * self.action_limit, dist.log_prob(action).sum(-1, keepdim=True)
 
-        max_step = 0.5
-        return np.clip(action, -1, 1) * max_step
+class SACAgent:
+    def __init__(self, state_dim, action_dim, gamma=0.95, alpha=0.2, tau=0.005, buffer_size=20000, batch_size=256):
+
+        # NETWORKS
+        self.actor  = SACActor(state_dim, action_dim)
+        self.critic1 = SACCritic(state_dim, action_dim)
+        self.critic2 = SACCritic(state_dim, action_dim)
+        self.critic1_target = deepcopy(self.critic1)
+        self.critic2_target = deepcopy(self.critic2)
+
+        # OPTIMISER
+        self.actor_optim  = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
+
+        # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
+        self.optimiser_emissions1 = torch.optim.Adam(self.critic1.emissions_head.parameters(), lr=5e-5)
+        self.optimiser_agreeableness1 = torch.optim.Adam(self.critic1.agreeableness_task_head.parameters(), lr=5e-5)
+        self.optimiser_shared1 = torch.optim.Adam(self.critic1.shared_layers.parameters(), lr=2.5e-4)
+
+        self.optimiser_emissions2 = torch.optim.Adam(self.critic2.emissions_head.parameters(), lr=5e-5)
+        self.optimiser_agreeableness2 = torch.optim.Adam(self.critic2.agreeableness_task_head.parameters(), lr=5e-5)
+        self.optimiser_shared2 = torch.optim.Adam(self.critic2.shared_layers.parameters(), lr=2.5e-4)
 
 
-    def update_model(self, loss, optimizer, model = None, target_model = None):
-        #update given network with given loss
+        # HYPERPARAMETERS
+        self.gamma = gamma
+        self.alpha = alpha
+        self.tau   = tau
+        self.batch_size = batch_size
+
+        # REPLAY BUFFER
+        self.buffer = deque(maxlen=buffer_size)
+
+        self.warmup_steps = 10000
+
+    def remember(self, state, prev_state, chi, action, rew_e, rew_a, next_state, done):
+        self.buffer.append((state, prev_state, chi, action, rew_e, rew_a, next_state, done))
+
+    def soft_update(self, net, target):
+        for p, tp in zip(net.parameters(), target.parameters()):
+            tp.data.mul_(1 - self.tau); tp.data.add_(self.tau * p.data)
+
+    def replay(self): 
         
-        #gradient descent
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm_(optimizer.param_groups[0]['params'], 1.0)
+        if len(self.buffer) < self.warmup_steps:
+            return None
         
-        optimizer.step()
-        optimizer.zero_grad()
+        # 1 - GET PAST EXPERIENCES
+        batch = random.sample(self.buffer, self.batch_size)
+        states, prev_states, chis, actions, rew_es, rew_as, next_states, dones = zip(*batch)
 
-        if model != None and target_model != None:
-            for param, target_param in zip(model.parameters(), target_model.parameters()):
-                new_target_param = (1 - self.tau) * target_param + self.tau * param
-                target_param.data.copy_(new_target_param)
+        # CONVERT TO TENSOR
+        states = torch.FloatTensor(states)
+        prev_states = torch.FloatTensor(prev_states)
+        actions = torch.LongTensor(actions)
+        rew_es = torch.FloatTensor(rew_es)
+        rew_as = torch.FloatTensor(rew_as)
+        next_states = torch.FloatTensor(next_states)
+        dones = torch.FloatTensor(dones)
+        chis = torch.FloatTensor(chis)
+        
+        # 2 - CRITIC TARGETS
+        with torch.no_grad():
+            next_actions, logp_next_actions = self.actor(next_states, states, chis)
+            q1e_next, q1a_next = self.critic1_target(next_states, states, chis, next_actions)
+            q2e_next, q2a_next = self.critic2_target(next_states, states, chis, next_actions)
 
-    def fit(self, state, action, reward, done, next_state):
-        #one training step for the network models
+            qe_next = torch.min(q1e_next, q2e_next)
+            qa_next = torch.min(q1a_next, q2a_next)
 
-        self.memory.append([state, action, reward, done, next_state])
+            target_e = rew_es + self.gamma * (qe_next - self.alpha * logp_next_actions) * (1 - dones)
+            target_a = rew_as + self.gamma * (qa_next - self.alpha * logp_next_actions) * (1 - dones)
 
-        if len(self.memory) > self.batch_size:
+        
+        # 3 - CURRENT Q
+        q1e, q1a = self.critic1(states, prev_states, chis, actions)
+        q2e, q2a = self.critic2(states, prev_states, chis, actions)
 
-            #sample batch from memory and convert to torch.tensor
-            batch = random.sample(self.memory, self.batch_size)
-            states, actions, rewards, dones, next_states = map(np.array, zip(*batch))
-            
-            states = torch.FloatTensor(states)
-            actions = torch.FloatTensor(actions)
-            rewards = torch.FloatTensor(rewards).unsqueeze(1)
-            dones = torch.FloatTensor(dones).unsqueeze(1)
-            next_states = torch.FloatTensor(next_states)
+        # 4 - CRITIC LOSSES
+        loss_q1_e = nn.MSELoss()(q1e, target_e.detach())
+        loss_q1_a = nn.MSELoss()(q1a, target_a.detach())
 
-            rewards, dones = rewards.unsqueeze(1), dones.unsqueeze(1)
+        loss_q2_e = nn.MSELoss()(q2e, target_e.detach())
+        loss_q2_a = nn.MSELoss()(q2a, target_a.detach())
 
-            #determine RHS of Bellman 
-            next_actions, next_log_probs = self.predict_actions(next_states)
-            next_states_and_actions = torch.concatenate((next_states, next_actions), dim = 1)
-            next_q1_values = self.q1_target_model(next_states_and_actions)
-            next_q2_values = self.q2_target_model(next_states_and_actions)
-            next_min_q_values = torch.min(next_q1_values, next_q2_values)
-            targets = rewards + self.gamma * (1 - dones) * (next_min_q_values - self.alpha * next_log_probs)
+        self.loss1_e_rec  = loss_q1_e.detach().item()
+        self.loss1_a_rec  = loss_q1_a.detach().item()
 
-            #update q1 and q2 networks to predict RHS
-            states_and_actions = torch.concatenate((states, actions), dim = 1)
-            q1_loss = torch.mean((self.q1_model(states_and_actions) - targets.detach()) ** 2)
-            q2_loss = torch.mean((self.q2_model(states_and_actions) - targets.detach()) ** 2)
-            self.update_model(q1_loss, self.q1_optimizer, self.q1_model, self.q1_target_model)
-            self.update_model(q2_loss, self.q2_optimizer, self.q2_model, self.q2_target_model)
+        self.loss2_e_rec  = loss_q2_e.detach().item()
+        self.loss2_a_rec  = loss_q2_a.detach().item()
+        
+        # ZERO ALL
+        self.optimiser_shared1.zero_grad()
+        self.optimiser_emissions1.zero_grad()
+        self.optimiser_agreeableness1.zero_grad()
 
-            #update pi network so that it minimises q1 and q2 network values
-            pred_actions, log_probs = self.predict_actions(states)
-            states_and_pred_actions = torch.concatenate((states, pred_actions), dim=1)
-            q1_values = self.q1_model(states_and_pred_actions)
-            q2_values = self.q2_model(states_and_pred_actions)
-            min_q_values = torch.min(q1_values, q2_values)
-            pi_loss = - torch.mean(min_q_values - self.alpha * log_probs)
-            self.update_model(pi_loss, self.pi_optimizer)
+        self.optimiser_shared2.zero_grad()
+        self.optimiser_emissions2.zero_grad()
+        self.optimiser_agreeableness2.zero_grad()
 
-def train(env, agent, episode_n, total_rewards = [], rollout_len = 200):
-    #train agent given no. episodes
+        loss_q1_e.backward(retain_graph=True)       # SHARED LAYERS USED TWICE
+        loss_q1_a.backward()
 
-    for episode in range(episode_n):
+        loss_q2_e.backward(retain_graph=True)
+        loss_q2_a.backward()
 
-        total_reward = 0
+        # UPDATE CRITICS
+        self.optimiser_shared1.step()
+        self.optimiser_emissions1.step()
+        self.optimiser_agreeableness1.step()
+
+        self.optimiser_shared2.step()
+        self.optimiser_emissions2.step()
+        self.optimiser_agreeableness2.step()
+
+        # 5 - ACTOR LOSS
+        actions_pi, logp_actions_pi = self.actor.get_action(states, prev_states, chis)
+        qe_pi1, qa_pi1 = self.critic1.forward_critic(states, prev_states, chis, actions_pi)
+        qe_pi2, qa_pi2 = self.critic2.forward_critic(states, prev_states, chis, actions_pi)
+
+        qe_pi = torch.min(qe_pi1, qe_pi2)
+        qa_pi = torch.min(qa_pi1, qa_pi2)
+
+        q_comb_pi = (1 - chis) * qe_pi + chis * qa_pi
+        loss_actor = (self.alpha * logp_actions_pi - q_comb_pi).mean()
+
+        self.actor_optim.zero_grad()
+        loss_actor.backward()
+        self.actor_optim.step()
+
+        # 6 - SOFT UPDATE CRITICS
+        self.soft_update(self.critic1, self.critic1_target)
+        self.soft_update(self.critic2, self.critic2_target)
+
+        return {
+        "loss_q1_e": self.loss1_e_rec,
+        "loss_q1_a": self.loss1_a_rec,
+        "loss_q2_e": self.loss2_e_rec,
+        "loss_q2_a": self.loss2_a_rec,
+        "loss_actor": loss_actor.item(),
+        "alpha": self.alpha,
+    }
+
+
+
+def train(env, agent, episodes):
+    total_rewards_e, total_rewards_a = [], []
+    total_losses_e, total_losses_a = [], []
+    avg_pred_q_e, avg_pred_q_a = [], []
+    avg_targets_e, avg_targets_a = [], []
+    actor_losses, alpha_values = [], []
+
+    for ep in range(episodes):
         state = env.reset()
+        prev_state = np.zeros(203)
+        done = False
 
-        for t in range(rollout_len):
+        episode_rewards_e, episode_rewards_a = 0, 0
+        episode_pred_q_e, episode_pred_q_a = [], []
+        episode_targets_e, episode_targets_a = [], []
 
-            action = agent.get_action(state, deterministic = True)
+        while not done:
+            chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
 
-            next_state, reward, done, _ = env.step(action)
+            action, _ = agent.actor.get_action(state, prev_state, chi_train)
 
-            agent.fit(state, action, reward, done, next_state)
+            next_state, rew_emissions, rew_agree, done = env.step(action)
 
-            total_reward += reward
+            agent.remember(state, prev_state, chi_train, action, rew_emissions, rew_agree, next_state, done)
 
+            prev_state = state
             state = next_state
-        
-        print(f"episode: {len(total_rewards)}, total_reward: {total_reward}, Final Emissions: {state[2]}, Action: {action}")
-        total_rewards.append(total_reward)
-    
-    plt.figure()
-    plt.plot(total_rewards)
-    plt.title('total_rewards')
-    plt.grid()
+
+            episode_rewards_e += rew_emissions
+            episode_rewards_a += rew_agree
+
+            replay_out = agent.replay()
+
+            if replay_out is not None:
+                episode_pred_q_e.append(replay_out["loss_q1_e"])
+                episode_pred_q_a.append(replay_out["loss_q1_a"])
+                episode_targets_e.append(replay_out["loss_q2_e"])
+                episode_targets_a.append(replay_out["loss_q2_a"])
+                actor_losses.append(replay_out["loss_actor"])
+                alpha_values.append(replay_out["alpha"])
+
+        # Episode-level logging
+        total_rewards_e.append(episode_rewards_e)
+        total_rewards_a.append(episode_rewards_a)
+        total_losses_e.append(np.mean(episode_pred_q_e) if episode_pred_q_e else 0)
+        total_losses_a.append(np.mean(episode_pred_q_a) if episode_pred_q_a else 0)
+        avg_pred_q_e.append(np.mean(episode_pred_q_e) if episode_pred_q_e else 0)
+        avg_pred_q_a.append(np.mean(episode_pred_q_a) if episode_pred_q_a else 0)
+        avg_targets_e.append(np.mean(episode_targets_e) if episode_targets_e else 0)
+        avg_targets_a.append(np.mean(episode_targets_a) if episode_targets_a else 0)
+
+        print(f"Episode {ep+1}/{episodes} | Rew(e,a): ({episode_rewards_e:.2f},{episode_rewards_a:.2f}) "
+              f"| Loss(e,a): ({total_losses_e[-1]:.4f},{total_losses_a[-1]:.4f}) | Alpha: {agent.alpha:.4f}")
+
+    # PLOTS
+    fig, axs = plt.subplots(3, 2, figsize=(14, 12))
+
+    axs[0, 0].plot(total_losses_e, label='Emissions Loss')
+    axs[0, 0].plot(total_losses_a, label='Agreeableness Loss')
+    axs[0, 0].set_title('Critic Losses')
+    axs[0, 0].legend()
+
+    axs[0, 1].plot(total_rewards_e, label='Emissions Reward')
+    axs[0, 1].plot(total_rewards_a, label='Agreeableness Reward')
+    axs[0, 1].set_title('Episode Rewards')
+    axs[0, 1].legend()
+
+    axs[1, 0].plot(avg_pred_q_e, label='Q_pred Emissions')
+    axs[1, 0].plot(avg_targets_e, label='Q_target Emissions')
+    axs[1, 0].set_title('Emissions Q-Values')
+    axs[1, 0].legend()
+
+    axs[1, 1].plot(avg_pred_q_a, label='Q_pred Agreeableness')
+    axs[1, 1].plot(avg_targets_a, label='Q_target Agreeableness')
+    axs[1, 1].set_title('Agreeableness Q-Values')
+    axs[1, 1].legend()
+
+    axs[2, 0].plot(actor_losses, label='Actor Loss')
+    axs[2, 0].set_title('Actor Loss')
+    axs[2, 0].legend()
+
+    axs[2, 1].plot(alpha_values, label='Alpha Value')
+    axs[2, 1].set_title('Alpha (Entropy Weight)')
+    axs[2, 1].legend()
+
+    plt.tight_layout()
     plt.show()
 
-def rollout_deterministic(env, agent, rollout_len=200, render=True):
-    state = env.reset()
-    emissions = []
-    prices = []
-    total_reward = 0
+if __name__ == "__main__":
 
-    for t in range(rollout_len):
-
-        action = agent.get_action(state, deterministic=True)
-        next_state, reward, done, _ = env.step(action)
-
-        total_reward += reward
-    
-    print(f"Total Reward (det.): {total_reward}")
-    if render:
-        env.render()
-
-# agent = SAC(state_dim, action_dim, alpha = 0.4, batch_size = 128, gamma = 0.95, pi_lr=1e-4, q_lr=2e-4)
-# train(env, agent, episode_n=1000) 
-
-# rollout_deterministic(env, agent)
-# env.render()
+    env = cpp_env.Environment()
+    agent = SACAgent(state_dim, action_dim)
+    episodes = 400
+    train(env, agent, episodes) 

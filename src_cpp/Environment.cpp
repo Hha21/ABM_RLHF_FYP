@@ -31,23 +31,23 @@ static inline double interpolate_model_1_1(double rel_C02_reduction, double rel_
 
     // CASE 1: 0->0.6, beta = 1.09
     if (rel_price_increase <= 0.6) {
-        PRICE_SCORE = (1.09 / 0.6) * rel_price_increase;
+        PRICE_SCORE = (1.09 / 0.6) * rel_price_increase * rel_C02_reduction;
     } 
     // CASE 2: 0.6->0.8, beta = 0.58
     else if (rel_price_increase <= 0.8) {                                        
-        PRICE_SCORE = 1.09 + (0.58 - 1.09) * ((rel_price_increase - 0.6) * 5.0); // ( / 0.2)
+        PRICE_SCORE = (1.09 + (0.58 - 1.09) * ((rel_price_increase - 0.6) * 5.0)) * rel_C02_reduction; // ( / 0.2)
     } 
     // IF BEYOND, LINEARLY EXTEND
     else {
         static const double slope = (-0.88 - 0.58) * 2.5; //(.../0.4) = -3.65
-        PRICE_SCORE = -0.88 * slope * (rel_price_increase - 1.2);
+        PRICE_SCORE = (-0.88 * slope * (rel_price_increase - 1.2)) * rel_C02_reduction;
     }
 
     // RETURN UTILITY V
-    return C02_SCORE + PRICE_SCORE;
+    return C02_SCORE + PRICE_SCORE * C02_SCORE;
 }
 
-std::tuple<std::vector<double>, double, double, bool> Environment::step(const int action_idx) {
+MDP Environment::step(const int action_idx) {
     
     // ENSURE WITHIN LIMITS
     assert(action_idx >= 0 && action_idx < 10);
@@ -59,6 +59,69 @@ std::tuple<std::vector<double>, double, double, bool> Environment::step(const in
         this->new_action = 0.0;
     } else {
         this->new_action = this->last_action + action;
+    }
+
+    int period = this->params.t_period;
+
+    // FOR ONE REGULATION PERIOD
+    for (int i = 0; i < period && this->t <= this->params.T; ++i, ++this->t) {
+        this->tax_actions[this->t] = this->new_action;
+
+        // MAIN DYNAMICS
+        this->sector.applyExpectations(this->t);
+        this->sector.applyAbatement(this->t, this->new_action);
+        this->sector.applyProduction(this->t, this->new_action);
+        this->sector.tradeCommodities(this->t);
+
+        // MEASURES
+        double price_goods = 0.0;
+        for (const Firm& firm : this->sector.firms) {
+                price_goods += firm.s[this->t] * firm.pg[this->t];
+        }
+
+        this->CC0[this->t] = price_goods;
+
+        double total_sold = this->sector.Q_s[this->t];
+        double total_revenue = this->sector.R[this->t];
+
+        double consumer_impact = price_goods - (total_sold > 0.0 ? total_revenue / total_sold : 0.0);
+        this->CC[this->t] = consumer_impact;
+
+        // FOR INITIALISING VALUES
+        if (this->t <= 10) {
+            this->init_emissions += this->sector.E[this->t];
+            this->init_CC0 += price_goods;
+        }
+        // MEAN
+        if (this->t == 10) {
+            this->init_emissions /= this->params.t_period;
+            this->init_CC0 /= this->params.t_period;
+        }
+    }
+
+
+    // GET OBSERVATIONS
+    std::vector<double> next_obs = Environment::observe();
+
+    // GET REWARD(s)
+    std::array<double, 2> reward = Environment::calculateReward(next_obs);
+
+    this->last_action = this->new_action;
+    done = (this->t > this->params.T);
+
+    // RETURN MDP
+    this->Markov = {next_obs, reward[0], reward[1], done};
+    return this->Markov;
+}
+
+MDP Environment::step(const double action_cont) {
+
+    if (this->last_action + action_cont > this->tax_limit) {
+        this->new_action = this->tax_limit;
+    } else if (this->last_action + action_cont < 0.0) {
+        this->new_action = 0.0;
+    } else {
+        this->new_action = this->last_action + action_cont;
     }
 
     int period = this->params.t_period;
@@ -155,7 +218,7 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     static const double alpha = 5.0;
 
     // SIGMOID TEMPERATURE
-    static const double temp_exp = 0.5;     // 1.5 prev
+    static const double temp_exp = 3.0;     // 1.5 prev
 
     // static const double E_TARGET = E0 * this->emissions_target;
     // static const double inv_denominator = 1.0 / (E0 - E_TARGET);
@@ -175,7 +238,7 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
 
     double penalty;
     if (price_increase > 0.6) {
-        penalty = std::exp(-2.0 * (price_increase - 0.6));
+        penalty = std::exp(-1.0 * (price_increase - 0.6));
     } else {
         penalty = 1.0;
     }

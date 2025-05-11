@@ -89,7 +89,7 @@ class MultiTaskQNet(nn.Module):
 
 # AGENT
 class MultiTaskAgent:
-    def __init__(self, state_dim, action_dim, decay_rate = 0.998, chi=0.5, temperature = 2.0):
+    def __init__(self, state_dim, action_dim, decay_rate = 0.9992, chi=0.5, temperature = 2.0):
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
@@ -296,6 +296,8 @@ def train(env, agent, episodes):
     plt.tight_layout()
     plt.show()
 
+    torch.save(agent.net.state_dict(), "ranker_agent_weights.pt")
+
     return total_losses_e, total_losses_a
 
 # DEPLOY AGENT 
@@ -321,19 +323,21 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
 
     newenv.outputTxt()
 
-agent = MultiTaskAgent(state_dim, action_dim)
-episodes = 1800
-losses_e, losses_a = train(env, agent, episodes) 
+if __name__ == "__main__":
 
-deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")
-deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "OPTIMISTIC")
-deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "OPTIMISTIC")
-deploy_agent(agent, chi_ = 0.7, temperature = 0.01, scenario = "OPTIMISTIC")
-deploy_agent(agent, chi_ = 0.9, temperature = 0.01, scenario = "OPTIMISTIC")
+    agent = MultiTaskAgent(state_dim, action_dim)
+    episodes = 4000
+    losses_e, losses_a = train(env, agent, episodes) 
 
-deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "PESSIMISTIC")
-deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "PESSIMISTIC")
-deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "PESSIMISTIC")
-deploy_agent(agent, chi_ = 0.7, temperature = 0.01, scenario = "PESSIMISTIC")
-deploy_agent(agent, chi_ = 0.9, temperature = 0.01, scenario = "PESSIMISTIC")
+    deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")
+    deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "OPTIMISTIC")
+    deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "OPTIMISTIC")
+    deploy_agent(agent, chi_ = 0.7, temperature = 0.01, scenario = "OPTIMISTIC")
+    deploy_agent(agent, chi_ = 0.9, temperature = 0.01, scenario = "OPTIMISTIC")
+
+    deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "PESSIMISTIC")
+    deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "PESSIMISTIC")
+    deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "PESSIMISTIC")
+    deploy_agent(agent, chi_ = 0.7, temperature = 0.01, scenario = "PESSIMISTIC")
+    deploy_agent(agent, chi_ = 0.9, temperature = 0.01, scenario = "PESSIMISTIC")
 

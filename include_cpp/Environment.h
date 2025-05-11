@@ -71,7 +71,11 @@ class Environment {
 
         Environment(std::string TECH_MODE = "AVERAGE", int seed_ = -1, double target_ = 0.2, double chi_ = 0.5);
 
+        // DISCRETE ACTION
         MDP step(const int action_idx);
+
+        // CONTINUOUS ACTION
+        MDP step(const double action_cont);
 
         void outputTxt();
 
