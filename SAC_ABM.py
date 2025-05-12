@@ -15,7 +15,7 @@ sys.path.insert(1, "./build")
 import cpp_env
 
 # Fixed Seed
-ENV_SEED = 42
+ENV_SEED = 52
 
 # Parameters
 state_dim = 203     # (50 firms * 4) + 3 sector features
@@ -24,6 +24,9 @@ action_dim = 1
 class SACCritic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
+
+        self.chi_action_embed_emissions = ChiActionEmbedding(embed_dim = 16)
+        self.chi_action_embed_agree = ChiActionEmbedding(embed_dim = 16)
 
         # FIRM FEATURES (2 * 200 [t, t-1])
         self.firm_branch = nn.Sequential(
@@ -47,7 +50,7 @@ class SACCritic(nn.Module):
 
         # EMISSIONS TASK HEAD
         self.emissions_head = nn.Sequential(
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256 + self.chi_action_embed_emissions.embed_dim, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, 1)
@@ -55,7 +58,7 @@ class SACCritic(nn.Module):
 
         # AGREEABLENESS TASK HEAD
         self.agreeableness_task_head = nn.Sequential(
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256 + self.chi_action_embed_agree.embed_dim, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, 1)
@@ -78,6 +81,7 @@ class SACCritic(nn.Module):
             chi = chi.unsqueeze(1)
         if action.dim() == 1:
             action = action.unsqueeze(1)
+
         sector_input = torch.cat([sector_features, prev_sector_features, chi, action], dim=1)
 
         firm_out = self.firm_branch(firm_input)
@@ -86,8 +90,11 @@ class SACCritic(nn.Module):
         combined = torch.cat([firm_out, sector_out], dim = 1)
         shared = self.shared_layers(combined)
 
-        emissions_q = self.emissions_head(shared)
-        agreeableness_q = self.agreeableness_task_head(shared)
+        x_emissions = torch.cat([shared, self.chi_action_embed_emissions(chi, action)], dim = 1)
+        x_agree = torch.cat([shared, self.chi_action_embed_agree(chi, action)], dim = 1)
+
+        emissions_q = self.emissions_head(x_emissions)
+        agreeableness_q = self.agreeableness_task_head(x_agree)
 
         return emissions_q, agreeableness_q
 
@@ -96,6 +103,8 @@ class SACActor(nn.Module):
         super().__init__()
         # SAME STATE ENCODING (without action)
 
+        self.chi_embed = ChiEmbedding(embed_dim = 8)
+        
         self.firm_branch = nn.Sequential(
             nn.Linear(400, 512), nn.ReLU(),
             nn.Linear(512, 256), nn.ReLU(),
@@ -109,9 +118,9 @@ class SACActor(nn.Module):
             nn.Linear(32, 16), nn.ReLU()
         )
 
-        # shared: (128 + 16) → 256
+        # shared: (128 + 16 + (8)) → 256
         self.shared = nn.Sequential(
-            nn.Linear(128 + 16, 256), nn.ReLU(),
+            nn.Linear(128 + 16 + self.chi_embed.embed_dim, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU()
         )
 
@@ -137,36 +146,75 @@ class SACActor(nn.Module):
 
         firm_input = torch.cat([firm_features, prev_firm_features], dim=1)
 
-        if chi.dim() == 1:
-            chi = chi.unsqueeze(1)
         sector_input = torch.cat([sector_features, prev_sector_features, chi], dim=1)
 
         firm_out = self.firm_branch(firm_input)
         sector_out = self.sector_branch(sector_input)
 
-        combined = torch.cat([firm_out, sector_out], dim = 1)
+        chi_embed = self.chi_embed(chi)
+
+        combined = torch.cat([firm_out, sector_out, chi_embed], dim = 1)
         shared = self.shared(combined)
 
         mu, logstd = self.mu_logstd(shared).chunk(2, dim=-1)
-        logstd = torch.clamp(logstd, -5, 2)
-        std = torch.exp(logstd)
-        dist = Normal(mu, std)
 
-        return dist
+        return mu, logstd
 
-    def get_action(self, state, prev_state, chi, deterministic=False):
-        
+    def predict_actions(self, states, prev_states, chis):
+        means, log_stds = self.forward(states, prev_states, chis)
+
+        dists = Normal(means, torch.exp(log_stds))
+        actions = dists.rsample()
+        log_probs = dists.log_prob(actions)
+
+        return actions, log_probs
+
+    def get_action(self, state, prev_state, chi, deterministic = False):
         state = torch.FloatTensor(state).unsqueeze(0)
         prev_state = torch.FloatTensor(prev_state).unsqueeze(0)
+        chi = torch.FloatTensor([chi]).unsqueeze(1)
 
-        dist = self.forward(state, prev_state, chi)
+        mean, log_std = self.forward(state, prev_state, chi)
 
         if deterministic:
-            action = dist.mean
+            action = mean
         else:
+            std = torch.exp(log_std)
+            dist = Normal(mean, std)
             action = dist.rsample()
-        # scale to action_limit
-        return torch.tanh(action).item() * self.action_limit, dist.log_prob(action).sum(-1, keepdim=True)
+
+        action = action * self.action_limit
+        return action.squeeze().item()
+
+class ChiEmbedding(nn.Module):
+    def __init__(self, embed_dim = 8):
+        super().__init__()
+        self.chi_embedding = nn.Sequential(
+            nn.Linear(1, embed_dim), nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim), nn.ReLU()
+        )
+        self.embed_dim = embed_dim
+
+    def forward(self, chi):
+
+        chi_out = self.chi_embedding(chi)
+    
+        return chi_out
+
+class ChiActionEmbedding(nn.Module):
+    def __init__(self, embed_dim = 16):
+        super().__init__()
+        self.chi_action_embedding = nn.Sequential(
+            nn.Linear(2, 32), nn.ReLU(),
+            nn.Linear(32, embed_dim), nn.ReLU()
+        )
+        self.embed_dim = embed_dim
+    
+    def forward(self, chi, action):
+        x = torch.cat([chi, action], dim = 1)
+        chi_action_out = self.chi_action_embedding(x)
+
+        return chi_action_out
 
 class SACAgent:
     def __init__(self, state_dim, action_dim, gamma=0.95, alpha=0.2, tau=0.005, buffer_size=20000, batch_size=256):
@@ -179,23 +227,43 @@ class SACAgent:
         self.critic2_target = deepcopy(self.critic2)
 
         # OPTIMISER
-        self.actor_optim  = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
+        self.actor_optim  = torch.optim.Adam( 
+            list(self.actor.parameters()) + 
+            list(self.actor.chi_embed.parameters()), lr = 3e-4)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
-        self.optimiser_emissions1 = torch.optim.Adam(self.critic1.emissions_head.parameters(), lr=5e-5)
-        self.optimiser_agreeableness1 = torch.optim.Adam(self.critic1.agreeableness_task_head.parameters(), lr=5e-5)
+        self.optimiser_emissions1 = torch.optim.Adam(
+            list(self.critic1.emissions_head.parameters()) + 
+            list(self.critic1.chi_action_embed_emissions.parameters()), lr=5e-5)
+
+        self.optimiser_agreeableness1 = torch.optim.Adam(
+            list(self.critic1.agreeableness_task_head.parameters()) + 
+            list(self.critic1.chi_action_embed_agree.parameters()), lr=5e-5)
+
         self.optimiser_shared1 = torch.optim.Adam(self.critic1.shared_layers.parameters(), lr=2.5e-4)
 
-        self.optimiser_emissions2 = torch.optim.Adam(self.critic2.emissions_head.parameters(), lr=5e-5)
-        self.optimiser_agreeableness2 = torch.optim.Adam(self.critic2.agreeableness_task_head.parameters(), lr=5e-5)
+        self.optimiser_emissions2 = torch.optim.Adam(
+            list(self.critic2.emissions_head.parameters()) + 
+            list(self.critic2.chi_action_embed_emissions.parameters()), lr=5e-5)
+
+        self.optimiser_agreeableness2 = torch.optim.Adam(
+            list(self.critic2.agreeableness_task_head.parameters()) + 
+            list(self.critic2.chi_action_embed_agree.parameters()), lr=5e-5)
+
         self.optimiser_shared2 = torch.optim.Adam(self.critic2.shared_layers.parameters(), lr=2.5e-4)
 
 
         # HYPERPARAMETERS
         self.gamma = gamma
-        self.alpha = alpha
+        # self.alpha = alpha
         self.tau   = tau
         self.batch_size = batch_size
+
+        # ALPHA TUNING (SAC_v2)
+        self.target_entropy = -2.0 
+        self.log_alpha = torch.tensor(np.log(alpha), requires_grad=True)
+        self.alpha = self.log_alpha.exp().item()
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=5e-5)
 
         # REPLAY BUFFER
         self.buffer = deque(maxlen=buffer_size)
@@ -218,19 +286,18 @@ class SACAgent:
         batch = random.sample(self.buffer, self.batch_size)
         states, prev_states, chis, actions, rew_es, rew_as, next_states, dones = zip(*batch)
 
-        # CONVERT TO TENSOR
-        states = torch.FloatTensor(states)
-        prev_states = torch.FloatTensor(prev_states)
-        actions = torch.LongTensor(actions)
-        rew_es = torch.FloatTensor(rew_es)
-        rew_as = torch.FloatTensor(rew_as)
-        next_states = torch.FloatTensor(next_states)
-        dones = torch.FloatTensor(dones)
-        chis = torch.FloatTensor(chis)
-        
+        states      = torch.FloatTensor(np.stack(states))                           # [B,203]
+        prev_states = torch.FloatTensor(np.stack(prev_states))                      # [B,203]
+        chis        = torch.FloatTensor(np.stack(chis))                             # [B,1]
+        actions     = torch.FloatTensor(np.stack(actions))                          # [B,1]
+        rew_es      = torch.FloatTensor(np.stack(rew_es)).unsqueeze(1)              # [B,1]
+        rew_as      = torch.FloatTensor(np.stack(rew_as)).unsqueeze(1)              # [B,1]
+        next_states = torch.FloatTensor(np.stack(next_states))                      # [B,203]
+        dones       = torch.FloatTensor(np.stack(dones)).unsqueeze(1)               # [B,1]
+
         # 2 - CRITIC TARGETS
         with torch.no_grad():
-            next_actions, logp_next_actions = self.actor(next_states, states, chis)
+            next_actions, logp_next_actions = self.actor.predict_actions(next_states, states, chis)
             q1e_next, q1a_next = self.critic1_target(next_states, states, chis, next_actions)
             q2e_next, q2a_next = self.critic2_target(next_states, states, chis, next_actions)
 
@@ -283,14 +350,25 @@ class SACAgent:
         self.optimiser_agreeableness2.step()
 
         # 5 - ACTOR LOSS
-        actions_pi, logp_actions_pi = self.actor.get_action(states, prev_states, chis)
-        qe_pi1, qa_pi1 = self.critic1.forward_critic(states, prev_states, chis, actions_pi)
-        qe_pi2, qa_pi2 = self.critic2.forward_critic(states, prev_states, chis, actions_pi)
+        actions_pi, logp_actions_pi = self.actor.predict_actions(states, prev_states, chis)
+        qe_pi1, qa_pi1 = self.critic1(states, prev_states, chis, actions_pi)
+        qe_pi2, qa_pi2 = self.critic2(states, prev_states, chis, actions_pi)
 
         qe_pi = torch.min(qe_pi1, qe_pi2)
         qa_pi = torch.min(qa_pi1, qa_pi2)
 
         q_comb_pi = (1 - chis) * qe_pi + chis * qa_pi
+
+        self.q_comb_rec = q_comb_pi.detach().mean().item()
+
+        # UPDATE ALPHA
+        alpha_loss = -(self.log_alpha * (logp_actions_pi + self.target_entropy).detach()).mean()
+
+        self.alpha_optim.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optim.step()
+        self.alpha = self.log_alpha.exp().item()
+
         loss_actor = (self.alpha * logp_actions_pi - q_comb_pi).mean()
 
         self.actor_optim.zero_grad()
@@ -308,6 +386,7 @@ class SACAgent:
         "loss_q2_a": self.loss2_a_rec,
         "loss_actor": loss_actor.item(),
         "alpha": self.alpha,
+        "q_comb": self.q_comb_rec,
     }
 
 
@@ -318,6 +397,7 @@ def train(env, agent, episodes):
     avg_pred_q_e, avg_pred_q_a = [], []
     avg_targets_e, avg_targets_a = [], []
     actor_losses, alpha_values = [], []
+    q_combs = []
 
     for ep in range(episodes):
         state = env.reset()
@@ -330,12 +410,14 @@ def train(env, agent, episodes):
 
         while not done:
             chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
-
-            action, _ = agent.actor.get_action(state, prev_state, chi_train)
+            
+            action = agent.actor.get_action(state, prev_state, chi_train)
 
             next_state, rew_emissions, rew_agree, done = env.step(action)
 
             agent.remember(state, prev_state, chi_train, action, rew_emissions, rew_agree, next_state, done)
+
+            #print(agent.actor.chi_embed.chi_embedding[0].weight.grad)
 
             prev_state = state
             state = next_state
@@ -352,6 +434,8 @@ def train(env, agent, episodes):
                 episode_targets_a.append(replay_out["loss_q2_a"])
                 actor_losses.append(replay_out["loss_actor"])
                 alpha_values.append(replay_out["alpha"])
+                q_combs.append(replay_out["q_comb"])
+
 
         # Episode-level logging
         total_rewards_e.append(episode_rewards_e)
@@ -367,7 +451,7 @@ def train(env, agent, episodes):
               f"| Loss(e,a): ({total_losses_e[-1]:.4f},{total_losses_a[-1]:.4f}) | Alpha: {agent.alpha:.4f}")
 
     # PLOTS
-    fig, axs = plt.subplots(3, 2, figsize=(14, 12))
+    fig, axs = plt.subplots(4, 2, figsize=(14, 16))
 
     axs[0, 0].plot(total_losses_e, label='Emissions Loss')
     axs[0, 0].plot(total_losses_a, label='Agreeableness Loss')
@@ -397,12 +481,39 @@ def train(env, agent, episodes):
     axs[2, 1].set_title('Alpha (Entropy Weight)')
     axs[2, 1].legend()
 
+    axs[3,0].plot(q_combs, label="Predicted Q_comb")
+    axs[3,0].set_title("Actor’s Q_comb Prediction")
+    axs[3,0].legend()
+
     plt.tight_layout()
     plt.show()
+
+def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
+    newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
+    state = newenv.reset()
+    prev_state = np.zeros(state_dim)
+    done = False
+
+    while (not done):
+
+        action = agent.actor.get_action(state, prev_state, chi_, deterministic = True)
+        next_state, _, _, done = newenv.step(action)
+
+        prev_state = state
+        state = next_state
+    
+    newenv.outputTxt()
+
 
 if __name__ == "__main__":
 
     env = cpp_env.Environment()
     agent = SACAgent(state_dim, action_dim)
-    episodes = 400
+    episodes = 1500
     train(env, agent, episodes) 
+
+    deploy_agent(agent, chi_ = 0.1, scenario = "OPTIMISTIC")
+    deploy_agent(agent, chi_ = 0.9, scenario = "OPTIMISTIC")
+
+    deploy_agent(agent, chi_ = 0.1, scenario = "PESSIMISTIC")
+    deploy_agent(agent, chi_ = 0.9, scenario = "PESSIMISTIC")
