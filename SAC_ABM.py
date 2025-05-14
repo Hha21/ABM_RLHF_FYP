@@ -255,20 +255,19 @@ class SACAgent:
 
         # HYPERPARAMETERS
         self.gamma = gamma
-        # self.alpha = alpha
+        self.alpha = alpha
         self.tau   = tau
         self.batch_size = batch_size
 
         # ALPHA TUNING (SAC_v2)
-        self.target_entropy = -2.0 
+        self.target_entropy = -3.0 
         self.log_alpha = torch.tensor(np.log(alpha), requires_grad=True)
-        self.alpha = self.log_alpha.exp().item()
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=5e-5)
-
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=1e-5)
+        
         # REPLAY BUFFER
         self.buffer = deque(maxlen=buffer_size)
 
-        self.warmup_steps = 10000
+        self.warmup_steps = 5000
 
     def remember(self, state, prev_state, chi, action, rew_e, rew_a, next_state, done):
         self.buffer.append((state, prev_state, chi, action, rew_e, rew_a, next_state, done))
@@ -367,6 +366,10 @@ class SACAgent:
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
         self.alpha_optim.step()
+
+        with torch.no_grad():
+            self.log_alpha.data.clamp(min = np.log(1e-3))
+
         self.alpha = self.log_alpha.exp().item()
 
         loss_actor = (self.alpha * logp_actions_pi - q_comb_pi).mean()
@@ -391,7 +394,7 @@ class SACAgent:
 
 
 
-def train(env, agent, episodes):
+def train(agent, episodes):
     total_rewards_e, total_rewards_a = [], []
     total_losses_e, total_losses_a = [], []
     avg_pred_q_e, avg_pred_q_a = [], []
@@ -399,7 +402,24 @@ def train(env, agent, episodes):
     actor_losses, alpha_values = [], []
     q_combs = []
 
+    scenario = "AVERAGE"
+
+    env = cpp_env.Environment(scenario)
+
     for ep in range(episodes):
+
+        if ep <= 500:
+            chi_low, chi_high = 0.05, 0.3
+        elif 500 < ep <= 1000:
+            chi_low, chi_high = 0.05, 0.6
+        elif 1000 < ep <= 1500:
+            chi_low, chi_high = 0.5, 0.95
+        else:
+            chi_low, chi_high = 0.05, 0.95
+            scenario = random.choice(["AVERAGE", "OPTIMISTIC", "PESSIMISTIC"])
+            env = cpp_env.Environment(scenario)
+
+
         state = env.reset()
         prev_state = np.zeros(203)
         done = False
@@ -408,8 +428,9 @@ def train(env, agent, episodes):
         episode_pred_q_e, episode_pred_q_a = [], []
         episode_targets_e, episode_targets_a = [], []
 
+        chi_train = torch.FloatTensor([np.random.uniform(chi_low, chi_high)])
+
         while not done:
-            chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
             
             action = agent.actor.get_action(state, prev_state, chi_train)
 
@@ -507,10 +528,9 @@ def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
 
 if __name__ == "__main__":
 
-    env = cpp_env.Environment()
     agent = SACAgent(state_dim, action_dim)
-    episodes = 1500
-    train(env, agent, episodes) 
+    episodes = 2000
+    train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, scenario = "OPTIMISTIC")
     deploy_agent(agent, chi_ = 0.9, scenario = "OPTIMISTIC")
