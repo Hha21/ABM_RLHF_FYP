@@ -11,14 +11,18 @@ import matplotlib.pyplot as plt
 sys.path.insert(1, "./build")
 import cpp_env
 
-env = cpp_env.Environment()
-
 # Fixed Seed
-ENV_SEED = 42
+ENV_SEED = 42       # for testing deployed agent
+NP_SEED = 42
 
 # Parameters
 state_dim = 203     # (50 firms * 4) + 3 sector features
 action_dim = 10     # discrete action space
+
+# GENERATE RANDOM ENV SEEDS
+np.random.seed(NP_SEED)
+SEED_LIST = np.random.randint(0, 5000, size = 3).tolist()
+print("Training Seed:", SEED_LIST)
 
 class ChiEmbedding(nn.Module):
     def __init__(self, embed_dim = 8):
@@ -41,8 +45,8 @@ class MultiTaskQNet(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
 
-        self.chi_embed_emissions = ChiEmbedding(embed_dim = 16)
-        self.chi_embed_agree = ChiEmbedding(embed_dim = 16)
+        # self.chi_embed_emissions = ChiEmbedding(embed_dim = 16)
+        # self.chi_embed_agree = ChiEmbedding(embed_dim = 16)
 
         # FIRM FEATURES (2 * 200 [t, t-1])
         self.firm_branch = nn.Sequential(
@@ -62,11 +66,12 @@ class MultiTaskQNet(nn.Module):
         self.shared_layers = nn.Sequential(
             nn.Linear(128 + 16, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
         )
 
         # EMISSIONS TASK HEAD
         self.emissions_head = nn.Sequential(
-            nn.Linear(256 + self.chi_action_embed_emissions.embed_dim, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, action_dim)
@@ -74,7 +79,7 @@ class MultiTaskQNet(nn.Module):
 
         # AGREEABLENESS TASK HEAD
         self.agreeableness_task_head = nn.Sequential(
-            nn.Linear(256 + self.chi_action_embed_agree.embed_dim, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, action_dim)
@@ -101,28 +106,34 @@ class MultiTaskQNet(nn.Module):
         combined = torch.cat([firm_out, sector_out], dim = 1)
         shared = self.shared_layers(combined)
 
-        x_emissions = torch.cat([shared, self.chi_embed_emissions(chi)], dim = 1)
-        x_agree = torch.cat([shared, self.chi_embed_agree(chi)], dim = 1)
+        # chi_embed_e = self.chi_embed_emissions(chi.unsqueeze(1))
+        # chi_embed_a = self.chi_embed_agree(chi.unsqueeze(1))
 
-        emissions_q = self.emissions_head(x_emissions)
-        agreeableness_q = self.agreeableness_task_head(x_agree)
+        # x_emissions = torch.cat([shared, chi_embed_e], dim = 1)
+        # x_agree = torch.cat([shared, chi_embed_a], dim = 1)
+
+        emissions_q = self.emissions_head(shared)
+        agreeableness_q = self.agreeableness_task_head(shared)
 
         return emissions_q, agreeableness_q
 
 # AGENT
 class MultiTaskAgent:
-    def __init__(self, state_dim, action_dim, decay_rate = 0.9992, chi=0.5, temperature = 2.0):
+    def __init__(self, state_dim, action_dim, decay_rate = 0.998, chi=0.5, temperature = 2.0):
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
 
-        self.optimiser_emissions = torch.optim.Adam(
-            list(self.net.emissions_head.parameters()) + 
-            list(self.net.chi_embed_emissions.parameters()), lr = 5e-5)
+        # self.optimiser_emissions = torch.optim.Adam(
+        #     list(self.net.emissions_head.parameters()) + 
+        #     list(self.net.chi_embed_emissions.parameters()), lr = 5e-5)
 
-        self.optimiser_agreeableness = torch.optim.Adam(
-            list(self.net.agreeableness_task_head.parameters()) +
-            list(self.net.chi_embed_agree.parameters()), lr = 5e-5)
+        # self.optimiser_agreeableness = torch.optim.Adam(
+        #     list(self.net.agreeableness_task_head.parameters()) +
+        #     list(self.net.chi_embed_agree.parameters()), lr = 5e-5)
+
+        self.optimiser_emissions = torch.optim.Adam(self.net.emissions_head.parameters(), lr = 5e-5)
+        self.optimiser_agreeableness = torch.optim.Adam(self.net.agreeableness_task_head.parameters(), lr = 5e-5)
 
         self.optimiser_shared = torch.optim.Adam(
             list(self.net.shared_layers.parameters()) + 
@@ -198,8 +209,8 @@ class MultiTaskAgent:
         target_e = rew_e + self.gamma * next_emissions_q * (1 - dones)
         target_a = rew_a + self.gamma * next_agree_q * (1 - dones)
 
-        target_e = target_e.clamp(-5.0, 30.0)
-        target_a = target_a.clamp(-5.0, 30.0)
+        target_e = target_e.clamp(-5.0, 40.0)
+        target_a = target_a.clamp(-5.0, 40.0)
 
         # LOSS
         loss_e = nn.MSELoss()(emissions_q, target_e.detach())
@@ -225,14 +236,17 @@ class MultiTaskAgent:
         return emissions_q.mean().item(), agree_q.mean().item(), target_e.mean().item(), target_a.mean().item()
 
 # TRAINING
-def train(env, agent, episodes):
+def train(agent, episodes):
     total_rewards_e, total_rewards_a = [], []
     total_losses_e, total_losses_a = [], []
     avg_pred_q_e, avg_pred_q_a = [], []
     avg_targets_e, avg_targets_a = [], []
 
     for ep in range (episodes):
+        train_seed = random.choice(SEED_LIST)
+        env = cpp_env.Environment("AVERAGE", seed = train_seed)
         state = env.reset()
+        
         prev_state = np.zeros(203)  #Init Prev State to Zeros
         done = False
 
@@ -319,7 +333,7 @@ def train(env, agent, episodes):
     return total_losses_e, total_losses_a
 
 # DEPLOY AGENT 
-def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
+def deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "AVERAGE"):
     newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
     prev_state = np.zeros(203)
@@ -344,8 +358,8 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = MultiTaskAgent(state_dim, action_dim)
-    episodes = 3000
-    losses_e, losses_a = train(env, agent, episodes) 
+    episodes = 2000
+    losses_e, losses_a = train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")
     deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "OPTIMISTIC")

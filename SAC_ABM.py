@@ -264,7 +264,7 @@ class SACAgent:
         # HYPERPARAMETERS
         self.gamma = gamma
         self.alpha = alpha
-        self.tau   = tau
+        self.tau   = tau                    #target smoothing
         self.batch_size = batch_size
 
         # ALPHA TUNING (SAC_v2)
