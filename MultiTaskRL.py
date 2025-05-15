@@ -20,10 +20,29 @@ ENV_SEED = 42
 state_dim = 203     # (50 firms * 4) + 3 sector features
 action_dim = 10     # discrete action space
 
+class ChiEmbedding(nn.Module):
+    def __init__(self, embed_dim = 8):
+        super().__init__()
+        self.chi_embedding = nn.Sequential(
+            nn.Linear(1, embed_dim), nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim), nn.ReLU()
+        )
+        self.embed_dim = embed_dim
+
+    def forward(self, chi):
+
+        chi_out = self.chi_embedding(chi)
+    
+        return chi_out
+
+
 # Multi-Task RANKER Q Net.
 class MultiTaskQNet(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
+
+        self.chi_embed_emissions = ChiEmbedding(embed_dim = 16)
+        self.chi_embed_agree = ChiEmbedding(embed_dim = 16)
 
         # FIRM FEATURES (2 * 200 [t, t-1])
         self.firm_branch = nn.Sequential(
@@ -47,7 +66,7 @@ class MultiTaskQNet(nn.Module):
 
         # EMISSIONS TASK HEAD
         self.emissions_head = nn.Sequential(
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256 + self.chi_action_embed_emissions.embed_dim, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, action_dim)
@@ -55,7 +74,7 @@ class MultiTaskQNet(nn.Module):
 
         # AGREEABLENESS TASK HEAD
         self.agreeableness_task_head = nn.Sequential(
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256 + self.chi_action_embed_agree.embed_dim, 256), nn.ReLU(),
             nn.Linear(256, 128), nn.ReLU(),
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, action_dim)
@@ -82,8 +101,11 @@ class MultiTaskQNet(nn.Module):
         combined = torch.cat([firm_out, sector_out], dim = 1)
         shared = self.shared_layers(combined)
 
-        emissions_q = self.emissions_head(shared)
-        agreeableness_q = self.agreeableness_task_head(shared)
+        x_emissions = torch.cat([shared, self.chi_embed_emissions(chi)], dim = 1)
+        x_agree = torch.cat([shared, self.chi_embed_agree(chi)], dim = 1)
+
+        emissions_q = self.emissions_head(x_emissions)
+        agreeableness_q = self.agreeableness_task_head(x_agree)
 
         return emissions_q, agreeableness_q
 
@@ -93,9 +115,19 @@ class MultiTaskAgent:
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
-        self.optimiser_emissions = torch.optim.Adam(self.net.emissions_head.parameters(), lr = 5e-5)
-        self.optimiser_agreeableness = torch.optim.Adam(self.net.agreeableness_task_head.parameters(), lr = 5e-5)
-        self.optimiser_shared = torch.optim.Adam(self.net.shared_layers.parameters(), lr = 2.5e-4)
+
+        self.optimiser_emissions = torch.optim.Adam(
+            list(self.net.emissions_head.parameters()) + 
+            list(self.net.chi_embed_emissions.parameters()), lr = 5e-5)
+
+        self.optimiser_agreeableness = torch.optim.Adam(
+            list(self.net.agreeableness_task_head.parameters()) +
+            list(self.net.chi_embed_agree.parameters()), lr = 5e-5)
+
+        self.optimiser_shared = torch.optim.Adam(
+            list(self.net.shared_layers.parameters()) + 
+            list(self.net.firm_branch.parameters()) + 
+            list(self.net.sector_branch.parameters()), lr = 1e-4)
 
         self.gamma = 0.95                           #Discount Factor
         self.memory = deque(maxlen = 20000)
@@ -113,7 +145,7 @@ class MultiTaskAgent:
 
         # TARGET NETWORK
         self.target_net = deepcopy(self.net)
-        self.target_update_freq = 10
+        self.target_update_freq = 20
         self.update_counter = 0
 
     def get_action(self, state, prev_state, chi):
@@ -215,23 +247,9 @@ def train(env, agent, episodes):
             agent.target_net.load_state_dict(agent.net.state_dict())
             print(f"TARGET NET UPDATED @ EPISODE {ep}")
 
+        chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
+
         while (not done):
-
-            # CURRICULUM CHI
-            # if ep < 1000:
-            #     chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.15)])
-            # elif ep < 2000:
-            #     chi_train = torch.FloatTensor([np.random.uniform(0.2, 0.4)])
-            # elif ep < 3000:
-            #     chi_train = torch.FloatTensor([np.random.uniform(0.4, 0.6)])
-            # elif ep < 4000:
-            #     chi_train = torch.FloatTensor([np.random.uniform(0.6, 0.8)])
-            # elif ep < 5000:
-            #     chi_train = torch.FloatTensor([np.random.uniform(0.8, 1.0)])
-            # else:
-            #     chi_train = torch.FloatTensor([np.random.uniform(0.0, 1.0)])
-
-            chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
 
             action = agent.get_action(state, prev_state, chi = chi_train)
             next_state, rew_emissions, rew_agree, done = env.step(action)
@@ -326,7 +344,7 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 1.0, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = MultiTaskAgent(state_dim, action_dim)
-    episodes = 4000
+    episodes = 3000
     losses_e, losses_a = train(env, agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")

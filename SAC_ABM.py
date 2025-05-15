@@ -127,7 +127,7 @@ class SACActor(nn.Module):
         # output Gaussian params: 2*action_dim
         self.mu_logstd = nn.Sequential(
             nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, 2*action_dim), nn.Tanh()
+            nn.Linear(256, 2*action_dim)
         )
 
         self.action_limit = action_limit
@@ -158,14 +158,22 @@ class SACActor(nn.Module):
 
         mu, logstd = self.mu_logstd(shared).chunk(2, dim=-1)
 
+        # CLAMP logstd
+        logstd = torch.clamp(logstd, min=-20, max=2)
+
         return mu, logstd
 
     def predict_actions(self, states, prev_states, chis):
         means, log_stds = self.forward(states, prev_states, chis)
+        stds = torch.exp(log_stds)
 
         dists = Normal(means, torch.exp(log_stds))
-        actions = dists.rsample()
-        log_probs = dists.log_prob(actions)
+        pre_tanh = dists.rsample()
+
+        actions = torch.tanh(pre_tanh) * self.action_limit
+
+        log_probs = dists.log_prob(pre_tanh).sum(dim=-1, keepdim=True)
+        log_probs -= torch.log(1 - actions.pow(2) / self.action_limit**2 + 1e-6).sum(dim=-1, keepdim=True)
 
         return actions, log_probs
 
@@ -177,11 +185,11 @@ class SACActor(nn.Module):
         mean, log_std = self.forward(state, prev_state, chi)
 
         if deterministic:
-            action = mean
+            action = torch.tanh(mean)
         else:
             std = torch.exp(log_std)
             dist = Normal(mean, std)
-            action = dist.rsample()
+            action = torch.tanh(dist.rsample())
 
         action = action * self.action_limit
         return action.squeeze().item()
@@ -229,7 +237,7 @@ class SACAgent:
         # OPTIMISER
         self.actor_optim  = torch.optim.Adam( 
             list(self.actor.parameters()) + 
-            list(self.actor.chi_embed.parameters()), lr = 3e-4)
+            list(self.actor.chi_embed.parameters()), lr = 1e-4)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
         self.optimiser_emissions1 = torch.optim.Adam(
@@ -262,7 +270,7 @@ class SACAgent:
         # ALPHA TUNING (SAC_v2)
         self.target_entropy = -3.0 
         self.log_alpha = torch.tensor(np.log(alpha), requires_grad=True)
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=1e-5)
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=5e-6)
         
         # REPLAY BUFFER
         self.buffer = deque(maxlen=buffer_size)
@@ -409,13 +417,13 @@ def train(agent, episodes):
     for ep in range(episodes):
 
         if ep <= 500:
-            chi_low, chi_high = 0.05, 0.3
+            chi_train = random.choice([0.1, 0.3])
         elif 500 < ep <= 1000:
-            chi_low, chi_high = 0.05, 0.6
+            chi_train = random.choice([0.1, 0.3, 0.5])
         elif 1000 < ep <= 1500:
-            chi_low, chi_high = 0.5, 0.95
+            chi_train = random.choice([0.3, 0.5, 0.7, 0.9])
         else:
-            chi_low, chi_high = 0.05, 0.95
+            chi_train = random.choice([0.1, 0.3, 0.5, 0.7, 0.9])
             scenario = random.choice(["AVERAGE", "OPTIMISTIC", "PESSIMISTIC"])
             env = cpp_env.Environment(scenario)
 
@@ -427,12 +435,13 @@ def train(agent, episodes):
         episode_rewards_e, episode_rewards_a = 0, 0
         episode_pred_q_e, episode_pred_q_a = [], []
         episode_targets_e, episode_targets_a = [], []
-
-        chi_train = torch.FloatTensor([np.random.uniform(chi_low, chi_high)])
+        
+        chi_train = torch.FloatTensor([chi_train])
+        #chi_train = torch.FloatTensor([np.random.uniform(chi_low, chi_high)])
 
         while not done:
             
-            action = agent.actor.get_action(state, prev_state, chi_train)
+            action = agent.actor.get_action(state, prev_state, chi_train, deterministic = False)
 
             next_state, rew_emissions, rew_agree, done = env.step(action)
 
@@ -509,6 +518,9 @@ def train(agent, episodes):
     plt.tight_layout()
     plt.show()
 
+    # SAVE ACTOR
+    torch.save(agent.actor.state_dict(), "actor_policy_weights.pt")
+
 def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
     newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
@@ -529,7 +541,7 @@ def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = SACAgent(state_dim, action_dim)
-    episodes = 2000
+    episodes = 500
     train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, scenario = "OPTIMISTIC")
