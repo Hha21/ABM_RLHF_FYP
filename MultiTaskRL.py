@@ -16,13 +16,13 @@ ENV_SEED = 42       # for testing deployed agent
 NP_SEED = 42
 
 # Parameters
-state_dim = 203     # (50 firms * 4) + 3 sector features
+state_dim = 204     # (50 firms * 4) + 4 sector features
 action_dim = 10     # discrete action space
 
 # GENERATE RANDOM ENV SEEDS
 np.random.seed(NP_SEED)
-SEED_LIST = np.random.randint(0, 5000, size = 3).tolist()
-print("Training Seed:", SEED_LIST)
+# SEED_LIST = np.random.randint(0, 5000, size = 3).tolist()
+# print("Training Seed:", SEED_LIST)
 
 class ChiEmbedding(nn.Module):
     def __init__(self, embed_dim = 8):
@@ -55,9 +55,9 @@ class MultiTaskQNet(nn.Module):
             nn.Linear(256, 128), nn.ReLU()
         )
 
-        # SECTOR FEATURES (2 * 3 [t, t-1] + chi)
+        # SECTOR FEATURES (2 * 4 [t, t-1] + chi)
         self.sector_branch = nn.Sequential(
-            nn.Linear(7, 32), nn.ReLU(),
+            nn.Linear(9, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
             nn.Linear(32, 16), nn.ReLU()
         )
@@ -90,7 +90,7 @@ class MultiTaskQNet(nn.Module):
         # [200]
         firm_features = state[:, :200]
 
-        # [3]
+        # [4]
         sector_features = state[:, 200:]
 
         prev_firm_features = prev_state[:, :200]
@@ -243,11 +243,11 @@ def train(agent, episodes):
     avg_targets_e, avg_targets_a = [], []
 
     for ep in range (episodes):
-        train_seed = random.choice(SEED_LIST)
-        env = cpp_env.Environment("AVERAGE", seed = train_seed)
+        
+        env = cpp_env.Environment()
         state = env.reset()
         
-        prev_state = np.zeros(203)  #Init Prev State to Zeros
+        prev_state = np.zeros(204)  #Init Prev State to Zeros
         done = False
 
         episode_rewards_e, episode_rewards_a = 0, 0
@@ -261,7 +261,10 @@ def train(agent, episodes):
             agent.target_net.load_state_dict(agent.net.state_dict())
             print(f"TARGET NET UPDATED @ EPISODE {ep}")
 
-        chi_train = torch.FloatTensor([np.random.uniform(0.05, 0.95)])
+        if ep < 600:
+            chi_train = torch.FloatTensor([np.random.uniform(0.075, 0.125)])
+        else:
+            chi_train = torch.FloatTensor([np.random.uniform(0.1, 0.95)])
 
         while (not done):
 
@@ -336,7 +339,7 @@ def train(agent, episodes):
 def deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "AVERAGE"):
     newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
-    prev_state = np.zeros(203)
+    prev_state = np.zeros(204)
     done = False
 
     while (not done):

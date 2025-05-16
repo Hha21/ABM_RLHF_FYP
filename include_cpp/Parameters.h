@@ -39,6 +39,8 @@ class Parameters {
 
         void applyTechScenario(TechScenario Scenario);
 
+        double spread = 0.01;  ///< Fractional spread, e.g. 0.1 = +/- 10% of midpoint
+
     public:
     
         int NP = 31;            // Num Periods

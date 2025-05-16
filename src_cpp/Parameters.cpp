@@ -1,7 +1,23 @@
 #include "../include_cpp/Parameters.h"
 
 inline double Parameters::random_val(int idx) {
-    std::uniform_real_distribution<> dist(this->range.bounds[idx][0], this->range.bounds[idx][1]);
+
+    // Tech-Optimism params
+    if (idx == 10 || idx == 11 || idx == 12) {
+        std::uniform_real_distribution<> dist(this->range.bounds[idx][0], this->range.bounds[idx][1]);
+        return dist(this->rng);
+    }
+
+    // For all other params, use spread around midpoint:
+    const double min = this->range.bounds[idx][0];
+    const double max = this->range.bounds[idx][1];
+    double midpoint = 0.5 * (min + max);
+    double half_spread = 0.5 * (max - min) * this->spread;
+
+    double lower = midpoint - half_spread;
+    double upper = midpoint + half_spread;
+
+    std::uniform_real_distribution<> dist(lower, upper);
     return dist(this->rng);
 }
 

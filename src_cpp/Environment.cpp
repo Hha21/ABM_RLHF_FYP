@@ -181,12 +181,14 @@ std::vector<double> Environment::observe() {
     
     // DEFINE OBSERVATIONS:
     // FOR EACH FIRM : {MARKET SHARE, EMISSIONS INTENSITY, COST OF PRODUCTION, NO. REMAINING ABATEMENT OPTIONS}
-    // FOR WHOLE SECTOR : {CURRENT EMISSIONS, LAST TAX LEVEL, CURRENT CONSUMER IMPACT}
+    // FOR WHOLE SECTOR : {FRAC TIME REMAINING, CURRENT EMISSIONS, LAST TAX LEVEL, CURRENT CONSUMER IMPACT}
 
     static const double invNumOptions = 1.0 / (static_cast<double>(this->params.lamb_n));
 
     std::vector<double> current_obs(this->observation_dim);
     const int t_curr = this->t - 1;
+
+    const double time_remaining = 1.0 - (static_cast<double>(t_curr - this->params.t_period) / (this->params.T - this->params.t_period));
 
     // GET FIRM OBS
     for (int i = 0; i < this->params.N; ++i) {
@@ -203,9 +205,10 @@ std::vector<double> Environment::observe() {
 
     int endIdx = this->params.N * 4;
     
-    current_obs[endIdx + 0] = E_recent;
-    current_obs[endIdx + 1] = this->new_action;
-    current_obs[endIdx + 2] = CC_recent;
+    current_obs[endIdx + 0] = time_remaining;
+    current_obs[endIdx + 1] = E_recent;
+    current_obs[endIdx + 2] = this->new_action;
+    current_obs[endIdx + 3] = CC_recent;
 
     return current_obs;
 }

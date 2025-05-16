@@ -46,7 +46,7 @@ class Environment {
         // FOR REWARD FUNCTION
         const double emissions_target;
         
-        const int observation_dim = (this->params.N) * (4) + (3);
+        const int observation_dim = (this->params.N) * (4) + (4);
 
         // ACTION LOOK-UP
         const std::array<double, 10> action_table = {-0.2, -0.1, -0.05, -0.01, 0.0, 0.01, 0.05, 0.1, 0.2, 0.3};
