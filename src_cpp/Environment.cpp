@@ -181,7 +181,10 @@ std::vector<double> Environment::observe() {
     
     // DEFINE OBSERVATIONS:
     // FOR EACH FIRM : {MARKET SHARE, EMISSIONS INTENSITY, COST OF PRODUCTION, NO. REMAINING ABATEMENT OPTIONS}
-    // FOR WHOLE SECTOR : {FRAC TIME REMAINING, CURRENT EMISSIONS, LAST TAX LEVEL, CURRENT CONSUMER IMPACT}
+    // FOR WHOLE SECTOR : {FRAC TIME REMAINING, E% INCREASE, CC0% INCREASE, CURRENT EMISSIONS, LAST TAX LEVEL, CURRENT CONSUMER IMPACT}
+    static const double E0_obs = this->init_emissions;
+    static const double CC0_0_obs = this->init_CC0;
+    static const double TARGET_RATIO_obs = 1.0 - this->emissions_target;
 
     static const double invNumOptions = 1.0 / (static_cast<double>(this->params.lamb_n));
 
@@ -204,11 +207,16 @@ std::vector<double> Environment::observe() {
     double CC_recent = this->CC[t_curr];
 
     int endIdx = this->params.N * 4;
+
+    double emissions_decrease = (E0_obs -E_recent) / (E0_obs);
+    double price_increase = (CC_recent / CC0_0_obs) - 1.0;
     
     current_obs[endIdx + 0] = time_remaining;
-    current_obs[endIdx + 1] = E_recent;
-    current_obs[endIdx + 2] = this->new_action;
-    current_obs[endIdx + 3] = CC_recent;
+    current_obs[endIdx + 1] = emissions_decrease;
+    current_obs[endIdx + 2] = price_increase;
+    current_obs[endIdx + 3] = E_recent;
+    current_obs[endIdx + 4] = this->new_action;
+    current_obs[endIdx + 5] = CC_recent;
 
     return current_obs;
 }

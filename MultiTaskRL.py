@@ -16,7 +16,7 @@ ENV_SEED = 42       # for testing deployed agent
 NP_SEED = 42
 
 # Parameters
-state_dim = 204     # (50 firms * 4) + 4 sector features
+state_dim = 206     # (50 firms * 4) + 6 sector features
 action_dim = 10     # discrete action space
 
 # GENERATE RANDOM ENV SEEDS
@@ -55,9 +55,9 @@ class MultiTaskQNet(nn.Module):
             nn.Linear(256, 128), nn.ReLU()
         )
 
-        # SECTOR FEATURES (2 * 4 [t, t-1] + chi)
+        # SECTOR FEATURES (2 * 6 [t, t-1] + chi)
         self.sector_branch = nn.Sequential(
-            nn.Linear(9, 32), nn.ReLU(),
+            nn.Linear(13, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
             nn.Linear(32, 16), nn.ReLU()
         )
@@ -247,7 +247,7 @@ def train(agent, episodes):
         env = cpp_env.Environment()
         state = env.reset()
         
-        prev_state = np.zeros(204)  #Init Prev State to Zeros
+        prev_state = np.zeros(state_dim)  #Init Prev State to Zeros
         done = False
 
         episode_rewards_e, episode_rewards_a = 0, 0
@@ -339,7 +339,7 @@ def train(agent, episodes):
 def deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "AVERAGE"):
     newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
     state = newenv.reset()
-    prev_state = np.zeros(204)
+    prev_state = np.zeros(state_dim)
     done = False
 
     while (not done):
