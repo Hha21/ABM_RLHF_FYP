@@ -99,7 +99,8 @@ MDP Environment::step(const int action_idx) {
         }
     }
 
-
+    done = (this->t > this->params.T);
+    
     // GET OBSERVATIONS
     std::vector<double> next_obs = Environment::observe();
 
@@ -107,7 +108,6 @@ MDP Environment::step(const int action_idx) {
     std::array<double, 2> reward = Environment::calculateReward(next_obs);
 
     this->last_action = this->new_action;
-    done = (this->t > this->params.T);
 
     // RETURN MDP
     this->Markov = {next_obs, reward[0], reward[1], done};
@@ -162,6 +162,7 @@ MDP Environment::step(const double action_cont) {
         }
     }
 
+    done = (this->t > this->params.T);
 
     // GET OBSERVATIONS
     std::vector<double> next_obs = Environment::observe();
@@ -170,7 +171,6 @@ MDP Environment::step(const double action_cont) {
     std::array<double, 2> reward = Environment::calculateReward(next_obs);
 
     this->last_action = this->new_action;
-    done = (this->t > this->params.T);
 
     // RETURN MDP
     this->Markov = {next_obs, reward[0], reward[1], done};
@@ -268,6 +268,15 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
 
     // const double exponent = -alpha * (emissions_decrease - TARGET_RATIO) * (emissions_decrease - TARGET_RATIO);
     // double emissions_reward = std::exp(exponent);
+
+    // SPARSE EMISSIONS REWARD (SCALE BY NUM PERIODS)
+    if (this->done == true) {
+        emissions_reward *= static_cast<double>(this->params.NP - 1);
+        agreeableness_reward *= static_cast<double>(this->params.NP - 1);
+    } else {
+        emissions_reward = 0.0;
+        agreeableness_reward = 0.0;
+    }
 
     std::array<double, 2> reward = {emissions_reward, agreeableness_reward};
 
