@@ -55,9 +55,9 @@ class MultiTaskQNet(nn.Module):
             nn.Linear(256, 128), nn.ReLU()
         )
 
-        # SECTOR FEATURES (2 * 6 [t, t-1] + chi)
+        # SECTOR FEATURES (2 * 6 [t, t-1])
         self.sector_branch = nn.Sequential(
-            nn.Linear(13, 32), nn.ReLU(),
+            nn.Linear(12, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
             nn.Linear(32, 16), nn.ReLU()
         )
@@ -98,7 +98,7 @@ class MultiTaskQNet(nn.Module):
 
         firm_input = torch.cat([firm_features, prev_firm_features], dim=1)
 
-        sector_input = torch.cat([sector_features, prev_sector_features, chi.unsqueeze(-1)], dim=1)
+        sector_input = torch.cat([sector_features, prev_sector_features], dim=1)
 
         firm_out = self.firm_branch(firm_input)
         sector_out = self.sector_branch(sector_input)
@@ -119,7 +119,7 @@ class MultiTaskQNet(nn.Module):
 
 # AGENT
 class MultiTaskAgent:
-    def __init__(self, state_dim, action_dim, decay_rate = 0.998, chi=0.5, temperature = 2.0):
+    def __init__(self, state_dim, action_dim, decay_rate = 0.998, chi=0.5, temperature = 30.0):
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
@@ -140,7 +140,7 @@ class MultiTaskAgent:
             list(self.net.firm_branch.parameters()) + 
             list(self.net.sector_branch.parameters()), lr = 1e-4)
 
-        self.gamma = 0.95                           #Discount Factor
+        self.gamma = 0.99                           #Discount Factor
         self.memory = deque(maxlen = 20000)
         self.batch_size = 256                       #Init
         self.chi = chi                              #Chi for Ranker
@@ -361,7 +361,7 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = MultiTaskAgent(state_dim, action_dim)
-    episodes = 2000
+    episodes = 3000
     losses_e, losses_a = train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")
