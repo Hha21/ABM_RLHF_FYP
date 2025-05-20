@@ -231,6 +231,8 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     // SIGMOID TEMPERATURE
     static const double temp_exp = 3.0;     // 1.5 prev
 
+    static const double feedback_ratio = 0.5;
+
     // static const double E_TARGET = E0 * this->emissions_target;
     // static const double inv_denominator = 1.0 / (E0 - E_TARGET);
 
@@ -272,10 +274,10 @@ std::array<double, 2> Environment::calculateReward(const std::vector<double>& ob
     // SPARSE EMISSIONS REWARD (SCALE BY NUM PERIODS)
     if (this->done == true) {
         emissions_reward *= static_cast<double>(this->params.NP - 1);
-        agreeableness_reward *= static_cast<double>(this->params.NP - 1);
+        agreeableness_reward *= static_cast<double>(this->params.NP - 1) * (1.0 - feedback_ratio);
     } else {
         emissions_reward = 0.0;
-        agreeableness_reward = 0.0;
+        agreeableness_reward *= feedback_ratio;
     }
 
     std::array<double, 2> reward = {emissions_reward, agreeableness_reward};

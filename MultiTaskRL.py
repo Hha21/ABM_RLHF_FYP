@@ -119,7 +119,7 @@ class MultiTaskQNet(nn.Module):
 
 # AGENT
 class MultiTaskAgent:
-    def __init__(self, state_dim, action_dim, decay_rate = 0.998, chi=0.5, temperature = 30.0):
+    def __init__(self, state_dim, action_dim, decay_rate = 0.9985, chi=0.5, temperature = 30.0):
         self.net = MultiTaskQNet(state_dim, action_dim)
 
         # SEPARATE OPTIMISERS FOR TWO HEADS, AND SHARED LAYERS
@@ -261,7 +261,7 @@ def train(agent, episodes):
             agent.target_net.load_state_dict(agent.net.state_dict())
             print(f"TARGET NET UPDATED @ EPISODE {ep}")
 
-        if ep < 600:
+        if ep < 700:
             chi_train = torch.FloatTensor([np.random.uniform(0.075, 0.125)])
         else:
             chi_train = torch.FloatTensor([np.random.uniform(0.1, 0.95)])
@@ -361,7 +361,7 @@ def deploy_agent(agent, chi_ = 0.5, temperature = 0.01, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = MultiTaskAgent(state_dim, action_dim)
-    episodes = 3000
+    episodes = 2500
     losses_e, losses_a = train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")

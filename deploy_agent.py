@@ -45,7 +45,7 @@ def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
         prev_state = state
         state, _, _, done = newenv.step(action)
 
-    #newenv.outputTxt()
+    newenv.outputTxt()
 
 # deploy_agent(agent, chi_ = 0.1, temperature = 0.01, scenario = "OPTIMISTIC")
 # deploy_agent(agent, chi_ = 0.3, temperature = 0.01, scenario = "OPTIMISTIC")
