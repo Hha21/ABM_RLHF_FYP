@@ -18,7 +18,7 @@ import cpp_env
 ENV_SEED = 52
 
 # Parameters
-state_dim = 203     # (50 firms * 4) + 3 sector features
+state_dim = 206     # (50 firms * 4) + 6 sector features
 action_dim = 1
 
 class SACCritic(nn.Module):
@@ -35,9 +35,9 @@ class SACCritic(nn.Module):
             nn.Linear(256, 128), nn.ReLU()
         )
 
-        # SECTOR FEATURES (2 * 3 [t, t-1] + chi + action)
+        # SECTOR FEATURES (2 * 6 [t, t-1] + chi + action)
         self.sector_branch = nn.Sequential(
-            nn.Linear(8, 32), nn.ReLU(),
+            nn.Linear(14, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
             nn.Linear(32, 16), nn.ReLU()
         )
@@ -111,9 +111,9 @@ class SACActor(nn.Module):
             nn.Linear(256, 128), nn.ReLU()
         )
 
-        # -1 for no action input
+        # SECTOR FEATURES (2 * 6 [t, t-1] + chi)
         self.sector_branch = nn.Sequential(
-            nn.Linear(7, 32), nn.ReLU(),
+            nn.Linear(13, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
             nn.Linear(32, 16), nn.ReLU()
         )
@@ -138,7 +138,7 @@ class SACActor(nn.Module):
          # [200]
         firm_features = state[:, :200]
 
-        # [3]
+        # [6]
         sector_features = state[:, 200:]
 
         prev_firm_features = prev_state[:, :200]
@@ -194,6 +194,22 @@ class SACActor(nn.Module):
         action = action * self.action_limit
         return action.squeeze().item()
 
+
+class RankerMLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+        self.rank = nn.Sequential(
+            nn.Linear(3, 32), nn.ReLU(),
+            nn.Linear(32, 32), nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, qe, qa, chi):
+        x = torch.cat([qe, chi, qa], dim = 1)
+        return self.rank(x)
+
+
 class ChiEmbedding(nn.Module):
     def __init__(self, embed_dim = 8):
         super().__init__()
@@ -234,6 +250,9 @@ class SACAgent:
         self.critic1_target = deepcopy(self.critic1)
         self.critic2_target = deepcopy(self.critic2)
 
+        self.ranker = RankerMLP()
+        self.ranker_target = deepcopy(self.ranker)
+
         # OPTIMISER
         self.actor_optim  = torch.optim.Adam( 
             list(self.actor.parameters()) + 
@@ -260,6 +279,7 @@ class SACAgent:
 
         self.optimiser_shared2 = torch.optim.Adam(self.critic2.shared_layers.parameters(), lr=2.5e-4)
 
+        self.optimiser_ranker = torch.optim.Adam(self.ranker.parameters(), lr = 1e-4)
 
         # HYPERPARAMETERS
         self.gamma = gamma
@@ -268,9 +288,9 @@ class SACAgent:
         self.batch_size = batch_size
 
         # ALPHA TUNING (SAC_v2)
-        self.target_entropy = -3.0 
+        self.target_entropy = -1.0 
         self.log_alpha = torch.tensor(np.log(alpha), requires_grad=True)
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=5e-6)
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=1e-4)
         
         # REPLAY BUFFER
         self.buffer = deque(maxlen=buffer_size)
@@ -314,24 +334,21 @@ class SACAgent:
             target_e = rew_es + self.gamma * (qe_next - self.alpha * logp_next_actions) * (1 - dones)
             target_a = rew_as + self.gamma * (qa_next - self.alpha * logp_next_actions) * (1 - dones)
 
+            q_rank_next = self.ranker_target(qe_next, qa_next, chis)
         
         # 3 - CURRENT Q
+
         q1e, q1a = self.critic1(states, prev_states, chis, actions)
         q2e, q2a = self.critic2(states, prev_states, chis, actions)
 
         # 4 - CRITIC LOSSES
-        loss_q1_e = nn.MSELoss()(q1e, target_e.detach())
-        loss_q1_a = nn.MSELoss()(q1a, target_a.detach())
+        loss_q1 = nn.MSELoss()(q1e, target_e.detach()) + nn.MSELoss()(q1a, target_a.detach())
+        loss_q2 = nn.MSELoss()(q2e, target_e.detach()) + nn.MSELoss()(q2a, target_a.detach())
 
-        loss_q2_e = nn.MSELoss()(q2e, target_e.detach())
-        loss_q2_a = nn.MSELoss()(q2a, target_a.detach())
+        # LOG
+        self.loss1_rec  = loss_q1.detach().item()
+        self.loss2_rec  = loss_q2.detach().item()
 
-        self.loss1_e_rec  = loss_q1_e.detach().item()
-        self.loss1_a_rec  = loss_q1_a.detach().item()
-
-        self.loss2_e_rec  = loss_q2_e.detach().item()
-        self.loss2_a_rec  = loss_q2_a.detach().item()
-        
         # ZERO ALL
         self.optimiser_shared1.zero_grad()
         self.optimiser_emissions1.zero_grad()
@@ -341,17 +358,12 @@ class SACAgent:
         self.optimiser_emissions2.zero_grad()
         self.optimiser_agreeableness2.zero_grad()
 
-        loss_q1_e.backward(retain_graph=True)       # SHARED LAYERS USED TWICE
-        loss_q1_a.backward()
-
-        loss_q2_e.backward(retain_graph=True)
-        loss_q2_a.backward()
-
-        # UPDATE CRITICS
+        loss_q1.backward()
         self.optimiser_shared1.step()
         self.optimiser_emissions1.step()
         self.optimiser_agreeableness1.step()
 
+        loss_q2.backward()
         self.optimiser_shared2.step()
         self.optimiser_emissions2.step()
         self.optimiser_agreeableness2.step()
@@ -364,9 +376,28 @@ class SACAgent:
         qe_pi = torch.min(qe_pi1, qe_pi2)
         qa_pi = torch.min(qa_pi1, qa_pi2)
 
+        q_rank = self.ranker(qe_pi, qa_pi, chis)
+        loss_actor = (self.alpha * logp_actions_pi - q_rank).mean()
+
+        self.actor_optim.zero_grad()
+        loss_actor.backward()
+        self.actor_optim.step()
+
+        # 6 - RANKER LOSS
         q_comb_pi = (1 - chis) * qe_pi + chis * qa_pi
 
         self.q_comb_rec = q_comb_pi.detach().mean().item()
+
+        r_chi = (1 - chis) * rew_es + chis * rew_as
+        q_rank = self.ranker(qe_pi.detach(), qa_pi.detach(), chis)
+        ranker_target = r_chi + self.gamma * (q_rank_next) * (1 - dones)
+        ranker_loss = nn.MSELoss()(q_rank, ranker_target.detach())
+
+        self.ranker_loss_rec = ranker_loss.item()
+
+        self.optimiser_ranker.zero_grad()
+        ranker_loss.backward()
+        self.optimiser_ranker.step()
 
         # UPDATE ALPHA
         alpha_loss = -(self.log_alpha * (logp_actions_pi + self.target_entropy).detach()).mean()
@@ -380,24 +411,18 @@ class SACAgent:
 
         self.alpha = self.log_alpha.exp().item()
 
-        loss_actor = (self.alpha * logp_actions_pi - q_comb_pi).mean()
-
-        self.actor_optim.zero_grad()
-        loss_actor.backward()
-        self.actor_optim.step()
-
         # 6 - SOFT UPDATE CRITICS
         self.soft_update(self.critic1, self.critic1_target)
         self.soft_update(self.critic2, self.critic2_target)
+        self.soft_update(self.ranker, self.ranker_target)
 
         return {
-        "loss_q1_e": self.loss1_e_rec,
-        "loss_q1_a": self.loss1_a_rec,
-        "loss_q2_e": self.loss2_e_rec,
-        "loss_q2_a": self.loss2_a_rec,
+        "loss_q1": self.loss1_rec,
+        "loss_q2": self.loss2_rec,
         "loss_actor": loss_actor.item(),
         "alpha": self.alpha,
         "q_comb": self.q_comb_rec,
+        "ranker_loss": self.ranker_loss_rec,
     }
 
 
@@ -409,6 +434,10 @@ def train(agent, episodes):
     avg_targets_e, avg_targets_a = [], []
     actor_losses, alpha_values = [], []
     q_combs = []
+
+    ranker_losses = []
+    policy_entropies = []
+    total_chi_returns = []
 
     scenario = "AVERAGE"
 
@@ -429,7 +458,7 @@ def train(agent, episodes):
 
 
         state = env.reset()
-        prev_state = np.zeros(203)
+        prev_state = np.zeros(state_dim)
         done = False
 
         episode_rewards_e, episode_rewards_a = 0, 0
@@ -458,14 +487,16 @@ def train(agent, episodes):
             replay_out = agent.replay()
 
             if replay_out is not None:
-                episode_pred_q_e.append(replay_out["loss_q1_e"])
-                episode_pred_q_a.append(replay_out["loss_q1_a"])
-                episode_targets_e.append(replay_out["loss_q2_e"])
-                episode_targets_a.append(replay_out["loss_q2_a"])
+                episode_pred_q_e.append(replay_out["loss_q1"])
+                episode_pred_q_a.append(replay_out["loss_q2"])
                 actor_losses.append(replay_out["loss_actor"])
                 alpha_values.append(replay_out["alpha"])
                 q_combs.append(replay_out["q_comb"])
+                ranker_losses.append(replay_out["ranker_loss"])
 
+        chi_val = float(chi_train.squeeze().cpu().numpy())
+        episode_total_chi_return = (1 - chi_val)*episode_rewards_e + chi_val*episode_rewards_a
+        total_chi_returns.append(episode_total_chi_return)
 
         # Episode-level logging
         total_rewards_e.append(episode_rewards_e)
@@ -481,7 +512,7 @@ def train(agent, episodes):
               f"| Loss(e,a): ({total_losses_e[-1]:.4f},{total_losses_a[-1]:.4f}) | Alpha: {agent.alpha:.4f}")
 
     # PLOTS
-    fig, axs = plt.subplots(4, 2, figsize=(14, 16))
+    fig, axs = plt.subplots(5, 2, figsize=(16, 20))
 
     axs[0, 0].plot(total_losses_e, label='Emissions Loss')
     axs[0, 0].plot(total_losses_a, label='Agreeableness Loss')
@@ -494,12 +525,10 @@ def train(agent, episodes):
     axs[0, 1].legend()
 
     axs[1, 0].plot(avg_pred_q_e, label='Q_pred Emissions')
-    axs[1, 0].plot(avg_targets_e, label='Q_target Emissions')
     axs[1, 0].set_title('Emissions Q-Values')
     axs[1, 0].legend()
 
     axs[1, 1].plot(avg_pred_q_a, label='Q_pred Agreeableness')
-    axs[1, 1].plot(avg_targets_a, label='Q_target Agreeableness')
     axs[1, 1].set_title('Agreeableness Q-Values')
     axs[1, 1].legend()
 
@@ -511,13 +540,24 @@ def train(agent, episodes):
     axs[2, 1].set_title('Alpha (Entropy Weight)')
     axs[2, 1].legend()
 
-    axs[3,0].plot(q_combs, label="Predicted Q_comb")
-    axs[3,0].set_title("Actor’s Q_comb Prediction")
-    axs[3,0].legend()
+    axs[3, 0].plot(q_combs, label="Predicted Q_comb")
+    axs[3, 0].set_title("Actor’s Q_comb Prediction")
+    axs[3, 0].legend()
+
+    axs[3, 1].plot(ranker_losses, label="Ranker Loss (MSE)")
+    axs[3, 1].set_title("Ranker Loss")
+    axs[3, 1].legend()
+
+    axs[4, 0].plot(policy_entropies, label="Policy Entropy")
+    axs[4, 0].set_title("Policy Entropy (per episode)")
+    axs[4, 0].legend()
+
+    axs[4, 1].plot(total_chi_returns, label="Chi-weighted Return")
+    axs[4, 1].set_title("Chi-weighted Episode Return")
+    axs[4, 1].legend()
 
     plt.tight_layout()
     plt.show()
-
     # SAVE ACTOR
     torch.save(agent.actor.state_dict(), "actor_policy_weights.pt")
 
@@ -541,7 +581,7 @@ def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = SACAgent(state_dim, action_dim)
-    episodes = 500
+    episodes = 2000
     train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, scenario = "OPTIMISTIC")
