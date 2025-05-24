@@ -288,7 +288,7 @@ class SACAgent:
         self.batch_size = batch_size
 
         # ALPHA TUNING (SAC_v2)
-        self.target_entropy = -1.0 
+        self.target_entropy = -0.2 
         self.log_alpha = torch.tensor(np.log(alpha), requires_grad=True)
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=1e-4)
         
@@ -444,17 +444,14 @@ def train(agent, episodes):
     env = cpp_env.Environment(scenario)
 
     for ep in range(episodes):
-
-        if ep <= 500:
-            chi_train = random.choice([0.1, 0.3])
-        elif 500 < ep <= 1000:
-            chi_train = random.choice([0.1, 0.3, 0.5])
-        elif 1000 < ep <= 1500:
-            chi_train = random.choice([0.3, 0.5, 0.7, 0.9])
+        
+        # CURRICULUM CHI
+        if ep <= 800:
+            chi_train = np.random.uniform(low = 0.0, high = 0.3)
+        elif 800 < ep <= 1500:
+            chi_train = np.random.uniform(low = 0.0, high = 0.5)
         else:
-            chi_train = random.choice([0.1, 0.3, 0.5, 0.7, 0.9])
-            scenario = random.choice(["AVERAGE", "OPTIMISTIC", "PESSIMISTIC"])
-            env = cpp_env.Environment(scenario)
+            chi_train = np.random.uniform(low = 0.3, high = 1.0)
 
 
         state = env.reset()
@@ -558,8 +555,10 @@ def train(agent, episodes):
 
     plt.tight_layout()
     plt.show()
-    # SAVE ACTOR
+    # SAVE ACTOR, ONE CRITIC, AND RANKER
     torch.save(agent.actor.state_dict(), "actor_policy_weights.pt")
+    torch.save(agent.critic1.state_dict(), "critic_weights.pt")
+    torch.save(agent.ranker.state_dict(), "SAC_ranker.pt")
 
 def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
     newenv = cpp_env.Environment(scenario, ENV_SEED, target = 0.2, chi = chi_)
@@ -581,7 +580,7 @@ def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
 if __name__ == "__main__":
 
     agent = SACAgent(state_dim, action_dim)
-    episodes = 2000
+    episodes = 2500
     train(agent, episodes) 
 
     deploy_agent(agent, chi_ = 0.1, scenario = "OPTIMISTIC")
