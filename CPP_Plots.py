@@ -4,7 +4,7 @@ import pandas as pd
 #plt.style.use('seaborn-v0_8-whitegrid')  # Consistent, clean look
 
 # === LOAD DATA (as before) ===
-file_path = "./EmissionsVsTaxData_Chi0.90_SEED52_MODEOPTIMISTIC.txt"
+file_path = "./EmissionsVsTaxData_Chi0.90_SEED52_MODEPESSIMISTIC.txt"
 data = pd.read_csv(
     file_path,
     delim_whitespace=True,

@@ -57,17 +57,17 @@ def deploy_agent(agent, chi_ = 0.9, scenario = "AVERAGE"):
 deploy_agent(agent, chi_ = 0.5, scenario = "PESSIMISTIC")
 
 def evaluate_returns(agent, scenario, chi_values, n_episodes=100):
-    returns = []
+    means = []
+    stds = []
     for chi_ in chi_values:
         episode_returns = []
         for _ in range(n_episodes):
-            # Slightly modified deploy_agent to return final return_ep
-            newenv = cpp_env.Environment(scenario, target = 0.2, chi = chi_)
+            newenv = cpp_env.Environment(scenario, target=0.2, chi=chi_)
             state = newenv.reset()
             prev_state = np.zeros(state_dim)
             done = False
             return_ep = 0
-            while (not done):
+            while not done:
                 state_tensor = torch.FloatTensor(state).unsqueeze(0)
                 prev_state_tensor = torch.FloatTensor(prev_state).unsqueeze(0)
                 emissions_q, agree_q = agent.net(state_tensor, prev_state_tensor, chi=torch.FloatTensor([chi_]))
@@ -75,32 +75,30 @@ def evaluate_returns(agent, scenario, chi_values, n_episodes=100):
                 action = np.argmax(combined_q.detach())
                 prev_state = state
                 state, re, ra, done = newenv.step(action)
-                return_ep += (1 - chi_)*re + chi_*ra
+                return_ep += (1 - chi_) * re + chi_ * ra
             episode_returns.append(return_ep)
-        returns.append(np.mean(episode_returns))
-    return np.array(returns)
+        means.append(np.mean(episode_returns))
+        stds.append(np.std(episode_returns))
+    return np.array(means), np.array(stds)
 
 chi_values = np.linspace(0, 1, 35)
 
-# returns_opt = evaluate_returns(agent, "OPTIMISTIC", chi_values)
-# returns_avg = evaluate_returns(agent, "AVERAGE", chi_values)
-# returns_pes = evaluate_returns(agent, "PESSIMISTIC", chi_values)
+returns_opt, stds_opt = evaluate_returns(agent, "OPTIMISTIC", chi_values)
+returns_avg, stds_avg = evaluate_returns(agent, "AVERAGE", chi_values)
+returns_pes, stds_pes = evaluate_returns(agent, "PESSIMISTIC", chi_values)
 
-# # Plotting
-# plt.figure(figsize=(8,5))
-# plt.plot(chi_values, returns_opt, '-', color = "red", label="Optimistic Scenario", linewidth=2)
-# plt.plot(chi_values, returns_pes, '-', color = "blue", label="Pessimistic Scenario",linewidth=2)
-# plt.plot(chi_values, returns_avg, '-', color = "green", label="Average Scenario", linewidth=2)
-# plt.xlabel(r'$\chi$', fontsize=20)
-# plt.ylabel("Average Episode Return", fontsize=20)
-# #plt.title("Average Episode Return vs $\chi$")
-# plt.legend(fontsize=20)
-# # plt.grid(True, alpha=0.3)
-# plt.grid(True, which='major', axis='both', linestyle='--', linewidth=0.7)
-# plt.tight_layout()
-# plt.xlim([0.0,1.0])
-# plt.ylim([14,30])
-# plt.show()
+plt.figure(figsize=(8,5))
+plt.errorbar(chi_values, returns_opt, yerr=stds_opt, fmt='-', color="red", label="Optimistic Scenario", linewidth=2, capsize=4)
+plt.errorbar(chi_values, returns_pes, yerr=stds_pes, fmt='-', color="blue", label="Pessimistic Scenario", linewidth=2, capsize=4)
+plt.errorbar(chi_values, returns_avg, yerr=stds_avg, fmt='-', color="green", label="Average Scenario", linewidth=2, capsize=4)
+plt.xlabel(r'$\chi$', fontsize=20)
+plt.ylabel("Average Episode Return", fontsize=20)
+plt.legend(fontsize=20)
+plt.grid(True, which='major', axis='both', linestyle='--', linewidth=0.7)
+plt.tight_layout()
+plt.xlim([0.0,1.0])
+plt.ylim([14,30])
+plt.show()
 
 def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n_episodes=100):
     if chi_values is None:
@@ -133,6 +131,8 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
             chi_agree_preds.append(torch.max(agree_q).item())
             chi_emiss_preds.append(torch.max(emissions_q).item())
 
+            gamma = 1
+
             while not done:
                 emissions_q_step, agree_q_step = agent.net(
                     torch.FloatTensor(state).unsqueeze(0),
@@ -143,8 +143,10 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
                 action = np.argmax(combined_q.detach())
                 prev_state = state
                 state, re, ra, done = newenv.step(action)
-                agree_return += ra
-                emiss_return += re
+                agree_return += ra * gamma
+                emiss_return += re * gamma
+
+                gamma *= agent.gamma
 
             chi_agree_rets.append(agree_return)
             chi_emiss_rets.append(emiss_return)
@@ -168,12 +170,12 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
                  label='Predicted Q (Agreeableness)')
     ax1.errorbar(chi_values, actual_rets_agree[:,0], yerr=actual_rets_agree[:,1], fmt='-', capsize=4, color = "blue",
                 label='Actual Return (Agreeableness)')
-    ax1.set_xlabel(r'$\chi$', fontsize=16)
-    ax1.set_ylabel("Episode Returns", fontsize=16)
+    ax1.set_xlabel(r'$\chi$', fontsize=20)
+    ax1.set_ylabel("Returns from " r'$s_{0}$', fontsize=20)
     ax1.set_title("Agreeableness Task", fontsize=15, fontweight='bold')
     ax1.set_xlim([0,1])
     ax1.set_ylim([15,40])
-    ax1.legend(fontsize=13)
+    ax1.legend(fontsize=18)
     ax1.grid(True, linestyle='--', alpha=0.5)
 
     # Plot for Emissions
@@ -181,11 +183,11 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
                 label='Predicted Q (Emissions)')
     ax2.errorbar(chi_values, actual_rets_emiss[:,0], yerr=actual_rets_emiss[:,1], fmt='-', capsize=4, color = "blue",
                 label='Actual Return (Emissions)')
-    ax2.set_xlabel(r'$\chi$', fontsize=16)
+    ax2.set_xlabel(r'$\chi$', fontsize=20)
     ax2.set_title("Emissions Task", fontsize=15, fontweight='bold')
     ax2.set_xlim([0,1])
-    ax2.set_ylim([15,40])
-    ax2.legend(fontsize=13)
+    ax2.set_ylim([10,35])
+    ax2.legend(fontsize=18)
     ax2.grid(True, linestyle='--', alpha=0.5)
 
     #plt.suptitle(f"Predicted Q vs Actual Return Across $\chi$ ({scenario} scenario)", fontsize=17, fontweight='bold')
@@ -193,5 +195,5 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     plt.show()
 
 # Example usage:
-chi_grid = np.linspace(0, 1, 11)
+chi_grid = np.linspace(0, 1, 20)
 #compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=50)

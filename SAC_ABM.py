@@ -241,7 +241,7 @@ class ChiActionEmbedding(nn.Module):
         return chi_action_out
 
 class SACAgent:
-    def __init__(self, state_dim, action_dim, gamma=0.95, alpha=0.2, tau=0.005, buffer_size=20000, batch_size=256):
+    def __init__(self, state_dim, action_dim, gamma=0.99, alpha=0.2, tau=0.005, buffer_size=20000, batch_size=256):
 
         # NETWORKS
         self.actor  = SACActor(state_dim, action_dim)
@@ -557,7 +557,8 @@ def train(agent, episodes):
     plt.show()
     # SAVE ACTOR, ONE CRITIC, AND RANKER
     torch.save(agent.actor.state_dict(), "actor_policy_weights.pt")
-    torch.save(agent.critic1.state_dict(), "critic_weights.pt")
+    torch.save(agent.critic1.state_dict(), "critic1_weights.pt")
+    torch.save(agent.critic2.state_dict(), "critic2_weights.pt")
     torch.save(agent.ranker.state_dict(), "SAC_ranker.pt")
 
 def deploy_agent(agent, chi_ = 0.5, scenario = "AVERAGE"):
