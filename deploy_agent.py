@@ -56,7 +56,7 @@ def deploy_agent(agent, chi_ = 0.9, scenario = "AVERAGE"):
 
 deploy_agent(agent, chi_ = 0.5, scenario = "PESSIMISTIC")
 
-def evaluate_returns(agent, scenario, chi_values, n_episodes=100):
+def evaluate_returns(agent, scenario, chi_values, n_episodes=50):
     means = []
     stds = []
     for chi_ in chi_values:
@@ -88,9 +88,14 @@ returns_avg, stds_avg = evaluate_returns(agent, "AVERAGE", chi_values)
 returns_pes, stds_pes = evaluate_returns(agent, "PESSIMISTIC", chi_values)
 
 plt.figure(figsize=(8,5))
-plt.errorbar(chi_values, returns_opt, yerr=stds_opt, fmt='-', color="red", label="Optimistic Scenario", linewidth=2, capsize=4)
-plt.errorbar(chi_values, returns_pes, yerr=stds_pes, fmt='-', color="blue", label="Pessimistic Scenario", linewidth=2, capsize=4)
-plt.errorbar(chi_values, returns_avg, yerr=stds_avg, fmt='-', color="green", label="Average Scenario", linewidth=2, capsize=4)
+plt.plot(chi_values, returns_opt, color="red", label="Optimistic Scenario", linewidth=2)
+plt.plot(chi_values, returns_pes, color="blue", label="Pessimistic Scenario", linewidth=2)
+plt.plot(chi_values, returns_avg, color="green", label="Average Scenario", linewidth=2)
+
+# plt.fill_between(chi_values, returns_opt - stds_opt, returns_opt + stds_opt, alpha=0.2)
+# plt.fill_between(chi_values, returns_pes - stds_pes, returns_pes + stds_pes, alpha=0.2)
+plt.fill_between(chi_values, returns_avg - stds_avg, returns_avg + stds_avg, alpha=0.2, color = "green")
+
 plt.xlabel(r'$\chi$', fontsize=20)
 plt.ylabel("Average Episode Return", fontsize=20)
 plt.legend(fontsize=20)
@@ -166,10 +171,10 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), sharex=True, sharey=True)
 
     # Plot for Agreeableness
-    ax1.errorbar(chi_values, pred_qs_agree[:,0], yerr=pred_qs_agree[:,1], fmt='-', capsize=4, color = "green",
-                 label='Predicted Q (Agreeableness)')
-    ax1.errorbar(chi_values, actual_rets_agree[:,0], yerr=actual_rets_agree[:,1], fmt='-', capsize=4, color = "blue",
-                label='Actual Return (Agreeableness)')
+    ax1.plot(chi_values, pred_qs_agree[:,0], color = "green", label='Predicted Q (Agreeableness)')
+    ax1.fill_between(chi_values, pred_qs_agree[:,0] - pred_qs_agree[:,1], pred_qs_agree[:,0] + pred_qs_agree[:,1], alpha = 0.2, color = "green")
+    ax1.plot(chi_values, actual_rets_agree[:,0], color = "blue", label='Actual Return (Agreeableness)')
+    ax1.fill_between(chi_values, actual_rets_agree[:,0] - actual_rets_agree[:,1], actual_rets_agree[:,0] + actual_rets_agree[:,1], alpha = 0.2, color = "blue")
     ax1.set_xlabel(r'$\chi$', fontsize=20)
     ax1.set_ylabel("Returns from " r'$s_{0}$', fontsize=20)
     ax1.set_title("Agreeableness Task", fontsize=15, fontweight='bold')
@@ -179,10 +184,10 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     ax1.grid(True, linestyle='--', alpha=0.5)
 
     # Plot for Emissions
-    ax2.errorbar(chi_values, pred_qs_emiss[:,0], yerr=pred_qs_emiss[:,1], fmt='-', capsize=4, color = "red",
-                label='Predicted Q (Emissions)')
-    ax2.errorbar(chi_values, actual_rets_emiss[:,0], yerr=actual_rets_emiss[:,1], fmt='-', capsize=4, color = "blue",
-                label='Actual Return (Emissions)')
+    ax2.plot(chi_values, pred_qs_emiss[:,0], color = "red", label='Predicted Q (Emissions)')
+    ax2.fill_between(chi_values, pred_qs_emiss[:,0] - pred_qs_emiss[:,1], pred_qs_emiss[:,0] + pred_qs_emiss[:,1], alpha = 0.2, color = "red")
+    ax2.plot(chi_values, actual_rets_emiss[:,0], color = "blue", label='Actual Return (Emissions)')
+    ax2.fill_between(chi_values, actual_rets_emiss[:,0] - actual_rets_emiss[:,1], actual_rets_emiss[:,0] + actual_rets_emiss[:,1], alpha = 0.2, color = "blue")
     ax2.set_xlabel(r'$\chi$', fontsize=20)
     ax2.set_title("Emissions Task", fontsize=15, fontweight='bold')
     ax2.set_xlim([0,1])
@@ -194,6 +199,5 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     plt.tight_layout(rect=[0, 0.03, 1, 0.96])
     plt.show()
 
-# Example usage:
-chi_grid = np.linspace(0, 1, 20)
-#compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=50)
+chi_grid = np.linspace(0, 1, 100)
+#compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=100)
