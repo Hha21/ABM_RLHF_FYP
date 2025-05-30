@@ -192,11 +192,12 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     ax1.fill_between(chi_values, pred_qs_agree[:,0] - pred_qs_agree[:,1], pred_qs_agree[:,0] + pred_qs_agree[:,1], color = "green", alpha = 0.2)
     ax1.plot(chi_values, actual_rets_agree[:,0],color = "blue", label='Actual Return (Agreeableness)')
     ax1.fill_between(chi_values, actual_rets_agree[:,0] - actual_rets_agree[:,1], actual_rets_agree[:,0] + actual_rets_agree[:,1], color = "blue", alpha = 0.2)
-    ax1.set_xlabel(r'$\chi$', fontsize=20)
-    ax1.set_ylabel("Episode Returns", fontsize=20)
-    ax1.set_title("Agreeableness Task", fontsize=15, fontweight='bold')
+    ax1.set_xlabel(r'$\chi$', fontsize=22)
+    ax1.set_ylabel("Episode Returns (Discounted)", fontsize=22)
+    ax1.set_title("Agreeableness Task", fontsize=24, fontweight='bold')
     ax1.set_xlim([0,1])
     ax1.set_ylim([5,35])
+    ax1.tick_params(labelsize=18)
     ax1.legend(fontsize=18)
     ax1.grid(True, linestyle='--', alpha=0.5)
 
@@ -205,10 +206,11 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     ax2.fill_between(chi_values, pred_qs_emiss[:,0] - pred_qs_emiss[:,1], pred_qs_emiss[:,0] + pred_qs_emiss[:,1], alpha = 0.2, color = "red")
     ax2.plot(chi_values, actual_rets_emiss[:,0], color = "blue", label='Actual Return (Emissions)')
     ax2.fill_between(chi_values, actual_rets_emiss[:,0] - actual_rets_emiss[:,1], actual_rets_emiss[:,0] + actual_rets_emiss[:,1], color = "blue", alpha = 0.2)
-    ax2.set_xlabel(r'$\chi$', fontsize=20)
-    ax2.set_title("Emissions Task", fontsize=15, fontweight='bold')
+    ax2.set_xlabel(r'$\chi$', fontsize=22)
+    ax2.set_title("Emissions Task", fontsize=24, fontweight='bold')
     ax2.set_xlim([0,1])
     ax2.set_ylim([5,35])
+    ax2.tick_params(labelsize=18)
     ax2.legend(fontsize=18)
     ax2.grid(True, linestyle='--', alpha=0.5)
 
@@ -216,7 +218,89 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     plt.show()
 
 chi_grid = np.linspace(0, 1, 30)
-compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=50)
+#compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=50)
+
+def compare_ranker_vs_actual_return(agent, scenario = "PESSIMISTIC", chi_values = None, n_episodes = 10):
+    if chi_values is None:
+        chi_values = np.linspace(0, 1, 11)
+    
+    ranker_preds = []
+    actual_returns = []
+    linear_preds = []
+
+    for chi_ in chi_values:
+        chi_ranker_preds = []
+        chi_actual_returns = []
+        chi_linear_preds = []
+
+        for ep in range(n_episodes):
+            newenv = cpp_env.Environment(scenario, target=0.2, chi=chi_)
+            state = newenv.reset()
+            prev_state = np.zeros(state_dim)
+            done = False
+
+            total_return = 0
+            gamma = 1.0
+            first_step = True
+
+            while not done:
+                action = agent.actor.get_action(state, prev_state, chi_, deterministic=True)
+                next_state, re_ep, ra_ep, done = newenv.step(action)
+
+                if first_step:
+                    state_tensor = torch.FloatTensor(state).unsqueeze(0)
+                    prev_tensor = torch.FloatTensor(prev_state).unsqueeze(0)
+                    chi_tensor = torch.FloatTensor([chi_]).unsqueeze(0)
+                    action_tensor = torch.FloatTensor(np.array(action)).unsqueeze(0)
+
+                    with torch.no_grad():
+                        q1e, q1a = agent.critic1(state_tensor, prev_tensor, chi_tensor, action_tensor)
+                        q2e, q2a = agent.critic2(state_tensor, prev_tensor, chi_tensor, action_tensor)
+                        RE = torch.min(q1e, q2e)
+                        RA = torch.min(q1a, q2a)
+                        ranker_pred = agent.ranker(RE, RA, chi_tensor).item()
+                        linear_pred = (1 - chi_) * RE.item() + chi_ * RA.item()
+                    chi_ranker_preds.append(ranker_pred)
+                    chi_linear_preds.append(linear_pred)
+                    first_step = False
+
+                total_return += ((1 - chi_) * re_ep + chi_ * ra_ep) * gamma
+
+                prev_state = state
+                state = next_state
+                gamma *= agent.gamma
+
+            chi_actual_returns.append(total_return)
+
+        ranker_preds.append([np.mean(chi_ranker_preds), np.std(chi_ranker_preds)])
+        linear_preds.append([np.mean(chi_linear_preds), np.std(chi_linear_preds)])
+        actual_returns.append([np.mean(chi_actual_returns), np.std(chi_actual_returns)])
+
+    ranker_preds = np.array(ranker_preds)
+    linear_preds = np.array(linear_preds)
+    actual_returns = np.array(actual_returns)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(chi_values, ranker_preds[:,0], label='Ranker Predicted Return', color='purple')
+    plt.fill_between(chi_values, ranker_preds[:,0]-ranker_preds[:,1], ranker_preds[:,0]+ranker_preds[:,1], color='purple', alpha=0.2)
+    plt.plot(chi_values, linear_preds[:,0], 'r--', label='Linear (RVD) Return')
+    plt.fill_between(chi_values, linear_preds[:,0]-linear_preds[:,1], linear_preds[:,0]+linear_preds[:,1], color='red', alpha=0.12)
+    plt.plot(chi_values, actual_returns[:,0], label='Actual Return', color='blue')
+    plt.fill_between(chi_values, actual_returns[:,0]-actual_returns[:,1], actual_returns[:,0]+actual_returns[:,1], color='blue', alpha=0.2)
+    plt.xlabel(r'$\chi$', fontsize=22)
+    plt.ylabel("Episode Return (Discounted)", fontsize=22)
+    plt.xlim([0,1])
+    plt.ylim([5,35])
+    plt.xticks(fontsize=18)
+    plt.yticks(fontsize=18)
+    plt.legend(fontsize=20)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+#chi_grid = np.linspace(0, 1, 30)
+#compare_ranker_vs_actual_return(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=50)
+
 
 def interpret_ranker(agent, scenario = "PESSIMISTIC", chi_values = None, n_episodes = 10):
     if chi_values is None:
@@ -410,4 +494,176 @@ def plot_ranker_surface_3d(agent, chi_values=[0.1, 0.3, 0.5, 0.7, 0.9], re_range
         plt.tight_layout()
         plt.show()
 
-#plot_ranker_surface_3d(agent)
+def plot_ranker_policy_relative_sensitivity(
+    agent,
+    scenario="PESSIMISTIC",
+    chi_values=None,
+    n_episodes=20,
+    steps_per_ep=1,
+    epsilon=1e-4
+):
+    if chi_values is None:
+        chi_values = np.linspace(0.005, 0.995, 50)  
+
+    # For statistics
+    chi_bins = []
+    rel_grads_QE = []
+    rel_grads_QA = []
+    rel_grads_chi = []
+
+    for chi_ in chi_values:
+        chi_bin_QE, chi_bin_QA, chi_bin_chi = [], [], []
+
+        for ep in range(n_episodes):
+            newenv = cpp_env.Environment(scenario, target=0.2, chi=chi_)
+            state = newenv.reset()
+            prev_state = np.zeros(state_dim)
+            done = False
+
+            for step in range(steps_per_ep):  # Only first step if steps_per_ep=1
+                action = agent.actor.get_action(state, prev_state, chi_, deterministic=True)
+                next_state, re_ep, ra_ep, done = newenv.step(action)
+
+                state_tensor = torch.FloatTensor(state).unsqueeze(0)
+                prev_tensor = torch.FloatTensor(prev_state).unsqueeze(0)
+                chi_tensor = torch.FloatTensor(np.array([chi_])).unsqueeze(0)
+                action_tensor = torch.FloatTensor(np.array(action)).unsqueeze(0)
+
+                with torch.no_grad():
+                    q1e, q1a = agent.critic1(state_tensor, prev_tensor, chi_tensor, action_tensor)
+                    q2e, q2a = agent.critic2(state_tensor, prev_tensor, chi_tensor, action_tensor)
+                RE = torch.min(q1e, q2e).item()
+                RA = torch.min(q1a, q2a).item()
+
+                # Compute finite differences for relative gradients
+                def fd(x, delta, idx):
+                    inp = [torch.tensor([[RE]], dtype=torch.float32), torch.tensor([[RA]], dtype=torch.float32), torch.tensor([[chi_]], dtype=torch.float32)]
+                    inp[idx] = inp[idx] + delta
+                    return agent.ranker(inp[0], inp[1], inp[2]).item()
+
+                # Ranker value
+                with torch.no_grad():
+                    G = agent.ranker(
+                        torch.tensor([[RE]], dtype=torch.float32),
+                        torch.tensor([[RA]], dtype=torch.float32),
+                        torch.tensor([[chi_]], dtype=torch.float32)
+                    ).item()
+
+                # Avoid div by zero for relative grad
+                if abs(G) < 1e-6:
+                    continue
+
+                # Q_E
+                dG_dQE = (fd(RE, epsilon, 0) - fd(RE, -epsilon, 0)) / (2 * epsilon)
+                rel_grad_QE = dG_dQE * RE / G if abs(RE) > 1e-6 else 0.0
+
+                # Q_A
+                dG_dQA = (fd(RA, epsilon, 1) - fd(RA, -epsilon, 1)) / (2 * epsilon)
+                rel_grad_QA = dG_dQA * RA / G if abs(RA) > 1e-6 else 0.0
+
+                # chi
+                dG_dchi = (fd(chi_, epsilon, 2) - fd(chi_, -epsilon, 2)) / (2 * epsilon)
+                rel_grad_chi = dG_dchi * chi_ / G if abs(chi_) > 1e-6 else 0.0
+
+                if (step == 29):
+                    chi_bin_QE.append(rel_grad_QE)
+                    chi_bin_QA.append(rel_grad_QA)
+                    chi_bin_chi.append(rel_grad_chi)
+
+                prev_state = state
+                state = next_state
+                if steps_per_ep == 1:
+                    break
+
+        # Store
+        rel_grads_QE.append([np.mean(chi_bin_QE), np.std(chi_bin_QE)])
+        rel_grads_QA.append([np.mean(chi_bin_QA), np.std(chi_bin_QA)])
+        rel_grads_chi.append([np.mean(chi_bin_chi), np.std(chi_bin_chi)])
+        chi_bins.append(chi_)
+
+    rel_grads_QE = np.array(rel_grads_QE)
+    rel_grads_QA = np.array(rel_grads_QA)
+    rel_grads_chi = np.array(rel_grads_chi)
+    chi_bins = np.array(chi_bins)
+
+    # Plot
+    plt.figure(figsize=(10,6))
+    plt.plot(chi_bins, rel_grads_QE[:,0], label=r"$\eta_{Q_{E}}$", color='red')
+    plt.fill_between(chi_bins, rel_grads_QE[:,0]-rel_grads_QE[:,1], rel_grads_QE[:,0]+rel_grads_QE[:,1], color='red', alpha=0.2)
+    plt.plot(chi_bins, rel_grads_QA[:,0], label=r"$\eta_{Q_{A}}$", color='green')
+    plt.fill_between(chi_bins, rel_grads_QA[:,0]-rel_grads_QA[:,1], rel_grads_QA[:,0]+rel_grads_QA[:,1], color='green', alpha=0.2)
+    plt.plot(chi_bins, rel_grads_chi[:,0], label=r"$\eta_{\chi}$", color='black')
+    plt.fill_between(chi_bins, rel_grads_chi[:,0]-rel_grads_chi[:,1], rel_grads_chi[:,0]+rel_grads_chi[:,1], color='black', alpha=0.15)
+    plt.xlabel(r"$\chi$", fontsize=18)
+    plt.ylabel("Mean Relative Gradient", fontsize=18)
+    plt.legend(loc = "upper left", fontsize=24)
+    plt.tight_layout()
+    plt.xlim([0,1])
+    plt.ylim([-0.8,1.4])
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.grid(linestyle = "--")
+    plt.show()
+
+#plot_ranker_policy_relative_sensitivity(agent, scenario="OPTIMISTIC", n_episodes=10, steps_per_ep=30)
+
+def plot_policy_action_trajectories(
+    agent,
+    scenario="PESSIMISTIC",
+    chi_values=None,
+    n_episodes=30,
+    max_steps=30,
+    action_dim=1
+):
+    if chi_values is None:
+        chi_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+
+    plt.figure(figsize=(10, 6))
+
+    for chi_ in chi_values:
+        all_actions = []
+
+        for ep in range(n_episodes):
+            newenv = cpp_env.Environment(scenario, target=0.2, chi=chi_)
+            state = newenv.reset()
+            prev_state = np.zeros(state_dim)
+            episode_actions = []
+            done = False
+
+            while not done:
+                action = agent.actor.get_action(state, prev_state, chi_, deterministic=True)
+                episode_actions.append(action)
+
+                next_state, _, _, done = newenv.step(action)
+                prev_state = state
+                state = next_state
+
+            all_actions.append(np.stack(episode_actions))
+
+        all_actions = np.stack(all_actions)
+
+        if action_dim == 1 or (len(all_actions.shape) == 2):
+            mean_actions = np.nanmean(all_actions, axis=0)
+            std_actions = np.nanstd(all_actions, axis=0)
+            plt.plot(mean_actions, label=f"$\chi$={chi_:.2f}")
+            plt.fill_between(np.arange(max_steps), mean_actions - std_actions, mean_actions + std_actions, alpha=0.15)
+        else:
+            for adim in range(action_dim):
+                mean_actions = np.nanmean(all_actions[:,:,adim], axis=0)
+                std_actions = np.nanstd(all_actions[:,:,adim], axis=0)
+                plt.plot(mean_actions, label=f"$\chi$={chi_:.2f}, dim {adim}")
+                plt.fill_between(np.arange(max_steps), mean_actions - std_actions, mean_actions + std_actions, alpha=0.1)
+
+    plt.xlabel("Policy Timestep", fontsize=20)
+    plt.ylabel(r'$\mu_a$', fontsize=20)
+    plt.legend(fontsize=20)
+    plt.tight_layout()
+    plt.grid(linestyle="--", alpha=0.4)
+    plt.xlim([0,30])
+    plt.ylim([-0.2, 0.3])
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.show()
+
+
+plot_policy_action_trajectories(agent, scenario="OPTIMISTIC", chi_values=[0.1, 0.3, 0.5, 0.7, 0.9], n_episodes=100, max_steps=30, action_dim=1)
