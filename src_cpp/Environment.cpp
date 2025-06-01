@@ -322,7 +322,7 @@ Environment::Environment(std::string TECH_MODE, int seed_, double target_, doubl
                             sector(params)   {
 
 
-    std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
+    //std::cout << "C++ ENVIRONMENT INTIALISED WITH " << this->params.N << " FIRMS..." << std::endl;
 
     std::vector<double> init_obs = Environment::reset();   
 

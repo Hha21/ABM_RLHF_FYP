@@ -194,7 +194,6 @@ class SACActor(nn.Module):
         action = action * self.action_limit
         return action.squeeze().item()
 
-
 class RankerMLP(nn.Module):
     def __init__(self):
         super().__init__()
@@ -208,7 +207,6 @@ class RankerMLP(nn.Module):
     def forward(self, qe, qa, chi):
         x = torch.cat([qe, chi, qa], dim = 1)
         return self.rank(x)
-
 
 class ChiEmbedding(nn.Module):
     def __init__(self, embed_dim = 8):

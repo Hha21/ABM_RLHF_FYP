@@ -665,5 +665,93 @@ def plot_policy_action_trajectories(
     plt.yticks(fontsize=14)
     plt.show()
 
+#plot_policy_action_trajectories(agent, scenario="OPTIMISTIC", chi_values=[0.1, 0.3, 0.5, 0.7, 0.9], n_episodes=100, max_steps=30, action_dim=1)
 
-plot_policy_action_trajectories(agent, scenario="OPTIMISTIC", chi_values=[0.1, 0.3, 0.5, 0.7, 0.9], n_episodes=100, max_steps=30, action_dim=1)
+def plot_policy_chi_sensitivity_by_chi(
+    agent,
+    scenario="PESSIMISTIC",
+    chi_values=None,
+    n_episodes=30,
+    max_steps=30,
+    action_dim=1,
+    epsilon=1e-3,
+    relative=True
+):
+    if chi_values is None:
+        chi_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+
+    plt.figure(figsize=(10,6))
+
+    for chi_ in chi_values:
+        chi_sensitivities = []
+
+        for ep in range(n_episodes):
+            newenv = cpp_env.Environment(scenario, target=0.2, chi=chi_)
+            state = newenv.reset()
+            prev_state = np.zeros(state_dim)
+            done = False
+
+            sensitivities = []
+            steps = 0
+
+            while not done and steps < max_steps:
+                # Compute action at chi
+                action0 = agent.actor.get_action(state, prev_state, chi_, deterministic=True)
+                action_plus = agent.actor.get_action(state, prev_state, chi_ + epsilon, deterministic=True)
+                action_minus = agent.actor.get_action(state, prev_state, chi_ - epsilon, deterministic=True)
+
+                dact_dchi = (np.array(action_plus) - np.array(action_minus)) / (2 * epsilon)
+
+                if action_dim == 1 or np.isscalar(action0):
+                    dact_dchi_val = dact_dchi
+                    act0 = action0
+                else:
+                    dact_dchi_val = np.linalg.norm(dact_dchi)
+                    act0 = np.linalg.norm(action0)
+
+                if relative:
+                    rel_sens = dact_dchi_val * chi_ / (act0 + 1e-8) if abs(act0) > 1e-8 else 0.0
+                else:
+                    rel_sens = dact_dchi_val
+
+                sensitivities.append(rel_sens)
+
+                next_state, _, _, done = newenv.step(action0)
+                prev_state = state
+                state = next_state
+                steps += 1
+
+            while len(sensitivities) < max_steps:
+                sensitivities.append(np.nan)
+
+            chi_sensitivities.append(sensitivities)
+
+        chi_sensitivities = np.array(chi_sensitivities)
+        mean_sens = np.nanmean(chi_sensitivities, axis=0)
+        std_sens = np.nanstd(chi_sensitivities, axis=0)
+
+        plt.plot(mean_sens, label=rf"$\chi$={chi_:.2f}")
+        plt.fill_between(np.arange(max_steps), mean_sens - std_sens, mean_sens + std_sens, alpha=0.15)
+
+    plt.xlabel("Policy Timestep", fontsize=20)
+    plt.ylabel(r'$\frac{\partial \mu_a}{\partial \chi}$', fontsize=27)
+    plt.legend(fontsize=20)
+    plt.tight_layout()
+    plt.grid(linestyle="--", alpha=0.5)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.xlim([0,30])
+    plt.ylim([-3.5, 1.0])
+    plt.show()
+
+
+plot_policy_chi_sensitivity_by_chi(
+    agent,
+    scenario="AVERAGE",
+    chi_values=[0.1, 0.3, 0.5, 0.7, 0.9],
+    n_episodes=150,
+    max_steps=30,
+    action_dim=1,
+    epsilon=1e-4,
+    relative=False
+)

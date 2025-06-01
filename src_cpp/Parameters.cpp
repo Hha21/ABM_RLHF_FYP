@@ -43,10 +43,10 @@ void Parameters::applyTechScenario(TechScenario scenario) {
             break;
     }
 
-    std::cout << "Tech scenario set: ";
-    if (scenario == TechScenario::OPTIMISTIC) std::cout << "OPTIMISTIC\n";
-    else if (scenario == TechScenario::PESSIMISTIC) std::cout << "PESSIMISTIC\n";
-    else std::cout << "AVERAGE\n";
+    // std::cout << "Tech scenario set: ";
+    // if (scenario == TechScenario::OPTIMISTIC) std::cout << "OPTIMISTIC\n";
+    // else if (scenario == TechScenario::PESSIMISTIC) std::cout << "PESSIMISTIC\n";
+    // else std::cout << "AVERAGE\n";
 }
 
 Parameters::Parameters(const std::string tech_scenario, const int fixed_seed) {
