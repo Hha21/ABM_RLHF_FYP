@@ -54,7 +54,7 @@ def deploy_agent(agent, chi_ = 0.9, scenario = "AVERAGE"):
     print(f"EPISODE RETURN {chi_} = {return_ep}")
     #newenv.outputTxt()
 
-deploy_agent(agent, chi_ = 0.5, scenario = "PESSIMISTIC")
+#deploy_agent(agent, chi_ = 0.5, scenario = "PESSIMISTIC")
 
 def evaluate_returns(agent, scenario, chi_values, n_episodes=50):
     means = []
@@ -96,10 +96,12 @@ plt.plot(chi_values, returns_avg, color="green", label="Average Scenario", linew
 # plt.fill_between(chi_values, returns_pes - stds_pes, returns_pes + stds_pes, alpha=0.2)
 plt.fill_between(chi_values, returns_avg - stds_avg, returns_avg + stds_avg, alpha=0.2, color = "green")
 
-plt.xlabel(r'$\chi$', fontsize=20)
-plt.ylabel("Average Episode Return", fontsize=20)
+plt.xlabel(r'$\chi$', fontsize=25)
+plt.ylabel("Average Episode Return", fontsize=25)
 plt.legend(fontsize=20)
 plt.grid(True, which='major', axis='both', linestyle='--', linewidth=0.7)
+plt.xticks(fontsize = 20)
+plt.yticks(fontsize = 20)
 plt.tight_layout()
 plt.xlim([0.0,1.0])
 plt.ylim([14,30])
@@ -175,11 +177,12 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     ax1.fill_between(chi_values, pred_qs_agree[:,0] - pred_qs_agree[:,1], pred_qs_agree[:,0] + pred_qs_agree[:,1], alpha = 0.2, color = "green")
     ax1.plot(chi_values, actual_rets_agree[:,0], color = "blue", label='Actual Return (Agreeableness)')
     ax1.fill_between(chi_values, actual_rets_agree[:,0] - actual_rets_agree[:,1], actual_rets_agree[:,0] + actual_rets_agree[:,1], alpha = 0.2, color = "blue")
-    ax1.set_xlabel(r'$\chi$', fontsize=20)
-    ax1.set_ylabel("Returns from " r'$s_{0}$', fontsize=20)
-    ax1.set_title("Agreeableness Task", fontsize=15, fontweight='bold')
+    ax1.set_xlabel(r'$\chi$', fontsize=22)
+    ax1.set_ylabel("Returns from " r'$s_{0}$', fontsize=22)
+    ax1.set_title("Agreeableness Task", fontsize=24, fontweight='bold')
     ax1.set_xlim([0,1])
     ax1.set_ylim([15,40])
+    ax1.tick_params(labelsize=18)
     ax1.legend(fontsize=18)
     ax1.grid(True, linestyle='--', alpha=0.5)
 
@@ -189,9 +192,10 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     ax2.plot(chi_values, actual_rets_emiss[:,0], color = "blue", label='Actual Return (Emissions)')
     ax2.fill_between(chi_values, actual_rets_emiss[:,0] - actual_rets_emiss[:,1], actual_rets_emiss[:,0] + actual_rets_emiss[:,1], alpha = 0.2, color = "blue")
     ax2.set_xlabel(r'$\chi$', fontsize=20)
-    ax2.set_title("Emissions Task", fontsize=15, fontweight='bold')
+    ax2.set_title("Emissions Task", fontsize=24, fontweight='bold')
     ax2.set_xlim([0,1])
     ax2.set_ylim([10,35])
+    ax2.tick_params(labelsize=18)
     ax2.legend(fontsize=18)
     ax2.grid(True, linestyle='--', alpha=0.5)
 
@@ -200,4 +204,4 @@ def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n
     plt.show()
 
 chi_grid = np.linspace(0, 1, 100)
-#compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=100)
+#compare_q_vs_return_across_chi(agent, scenario="PESSIMISTIC", chi_values=chi_grid, n_episodes=200)

@@ -90,27 +90,29 @@ def evaluate_returns(agent, scenario, chi_values, n_episodes=20):
 
     return np.array(means), np.array(stds)
 
-# chi_values = np.linspace(0, 1, 50)
+chi_values = np.linspace(0, 1, 50)
 
-# returns_opt, stds_opt = evaluate_returns(agent, "OPTIMISTIC", chi_values)
-# returns_avg, stds_avg = evaluate_returns(agent, "AVERAGE", chi_values, n_episodes = 150)
-# returns_pes, stds_pes = evaluate_returns(agent, "PESSIMISTIC", chi_values)
+returns_opt, stds_opt = evaluate_returns(agent, "OPTIMISTIC", chi_values, n_episodes = 50)
+returns_avg, stds_avg = evaluate_returns(agent, "AVERAGE", chi_values, n_episodes = 150)
+returns_pes, stds_pes = evaluate_returns(agent, "PESSIMISTIC", chi_values, n_episodes = 50)
 
-# plt.figure(figsize=(8,5))
-# plt.plot(chi_values, returns_opt, '-', color="red", label="Optimistic Scenario", linewidth=2)
-# #plt.fill_between(chi_values, returns_opt - stds_opt, returns_opt + stds_opt, color="red", alpha=0.18)
-# plt.plot(chi_values, returns_pes, '-', color="blue", label="Pessimistic Scenario", linewidth=2)
-# # plt.fill_between(chi_values, returns_pes - stds_pes, returns_pes + stds_pes, color="blue", alpha=0.18)
-# plt.plot(chi_values, returns_avg, '-', color="green", label="Average Scenario", linewidth=2)
-# plt.fill_between(chi_values, returns_avg - stds_avg, returns_avg + stds_avg, color="green", alpha=0.18)
-# plt.xlabel(r'$\chi$', fontsize=20)
-# plt.ylabel("Average Episode Return", fontsize=20)
-# plt.legend(fontsize=20)
-# plt.grid(True, which='major', axis='both', linestyle='--', linewidth=0.7)
-# plt.tight_layout()
-# plt.xlim([0.0,1.0])
-# plt.ylim([14,30])
-# plt.show()
+plt.figure(figsize=(8,5))
+plt.plot(chi_values, returns_opt, '-', color="red", label="Optimistic Scenario", linewidth=2)
+#plt.fill_between(chi_values, returns_opt - stds_opt, returns_opt + stds_opt, color="red", alpha=0.18)
+plt.plot(chi_values, returns_pes, '-', color="blue", label="Pessimistic Scenario", linewidth=2)
+# plt.fill_between(chi_values, returns_pes - stds_pes, returns_pes + stds_pes, color="blue", alpha=0.18)
+plt.plot(chi_values, returns_avg, '-', color="green", label="Average Scenario", linewidth=2)
+plt.fill_between(chi_values, returns_avg - stds_avg, returns_avg + stds_avg, color="green", alpha=0.18)
+plt.xlabel(r'$\chi$', fontsize=25)
+plt.ylabel("Average Episode Return", fontsize=25)
+plt.legend(fontsize=20)
+plt.grid(True, which='major', axis='both', linestyle='--', linewidth=0.7)
+plt.xticks(fontsize = 20)
+plt.yticks(fontsize = 20)
+plt.tight_layout()
+plt.xlim([0.0,1.0])
+plt.ylim([14,30])
+plt.show()
 
 def compare_q_vs_return_across_chi(agent, scenario="AVERAGE", chi_values=None, n_episodes=10):
     if chi_values is None:
@@ -654,11 +656,11 @@ def plot_policy_action_trajectories(
                 plt.plot(mean_actions, label=f"$\chi$={chi_:.2f}, dim {adim}")
                 plt.fill_between(np.arange(max_steps), mean_actions - std_actions, mean_actions + std_actions, alpha=0.1)
 
-    plt.xlabel("Policy Timestep", fontsize=20)
-    plt.ylabel(r'$\mu_a$', fontsize=20)
-    plt.legend(fontsize=20)
+    # plt.xlabel("Policy Timestep", fontsize=20)
+    # plt.ylabel(r'$\mu_a$', fontsize=20)
+    # plt.legend(fontsize=20)
     plt.tight_layout()
-    plt.grid(linestyle="--", alpha=0.4)
+    # plt.grid(linestyle="--", alpha=0.4)
     plt.xlim([0,30])
     plt.ylim([-0.2, 0.3])
     plt.xticks(fontsize=14)
@@ -666,6 +668,7 @@ def plot_policy_action_trajectories(
     plt.show()
 
 #plot_policy_action_trajectories(agent, scenario="OPTIMISTIC", chi_values=[0.1, 0.3, 0.5, 0.7, 0.9], n_episodes=100, max_steps=30, action_dim=1)
+#plot_policy_action_trajectories(agent, scenario="PESSIMISTIC", chi_values=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], n_episodes=100, max_steps=30, action_dim=1)
 
 def plot_policy_chi_sensitivity_by_chi(
     agent,
@@ -745,13 +748,13 @@ def plot_policy_chi_sensitivity_by_chi(
     plt.show()
 
 
-plot_policy_chi_sensitivity_by_chi(
-    agent,
-    scenario="AVERAGE",
-    chi_values=[0.1, 0.3, 0.5, 0.7, 0.9],
-    n_episodes=150,
-    max_steps=30,
-    action_dim=1,
-    epsilon=1e-4,
-    relative=False
-)
+# plot_policy_chi_sensitivity_by_chi(
+#     agent,
+#     scenario="AVERAGE",
+#     chi_values=[0.1, 0.3, 0.5, 0.7, 0.9],
+#     n_episodes=150,
+#     max_steps=30,
+#     action_dim=1,
+#     epsilon=1e-4,
+#     relative=False
+# )
